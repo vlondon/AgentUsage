@@ -37,8 +37,13 @@ struct ClaudeUsageClient: UsageProviderClient {
 
     static func parse(_ data: Data) throws -> [AllowanceWindow] {
         let root = try JSONSupport.dictionary(from: data)
-        let limits = (root["rate_limits"] as? [String: Any]) ?? root
+        if let windows = parseLimits(root["limits"]), !windows.isEmpty {
+            return windows
+        }
 
+        // Older responses only carried the per-window objects, where utilization
+        // was a 0...1 fraction.
+        let limits = (root["rate_limits"] as? [String: Any]) ?? root
         let fiveHour = makeWindow(
             id: "claude-five-hour",
             label: "5h session",
@@ -54,6 +59,53 @@ struct ClaudeUsageClient: UsageProviderClient {
             throw UsageClientError.invalidResponse("Claude did not report session or weekly usage.")
         }
         return windows
+    }
+
+    /// Parses the `limits` array, where `percent` is always the used percentage
+    /// of the window on a 0...100 scale.
+    private static func parseLimits(_ value: Any?) -> [AllowanceWindow]? {
+        guard let entries = value as? [[String: Any]] else { return nil }
+        // Plans without a model-scoped weekly allowance show a single, unqualified
+        // "Weekly" row; when a scoped one exists, both rows name their scope.
+        let hasScopedWeekly = entries.contains { JSONSupport.string($0["kind"]) == "weekly_scoped" }
+        return entries.compactMap { entry -> AllowanceWindow? in
+            guard let kind = JSONSupport.string(entry["kind"]),
+                  let usedPercent = JSONSupport.double(entry["percent"])
+            else { return nil }
+
+            // Only present for plans that have a model-scoped weekly allowance.
+            let scope = (entry["scope"] as? [String: Any])
+                .flatMap { $0["model"] as? [String: Any] }
+                .flatMap { JSONSupport.string($0["display_name"]) }
+
+            let id: String
+            let label: String
+            let displayScope: String?
+            switch kind {
+            case "session":
+                id = "claude-five-hour"
+                label = "5h session"
+                displayScope = nil
+            case "weekly_all":
+                id = "claude-seven-day"
+                label = "Weekly"
+                displayScope = hasScopedWeekly ? "All models" : nil
+            case "weekly_scoped":
+                id = "claude-seven-day-\(scope ?? "scoped")"
+                label = "Weekly"
+                displayScope = scope
+            default:
+                return nil
+            }
+
+            return AllowanceWindow(
+                id: id,
+                label: label,
+                scope: displayScope,
+                remainingPercent: 100 - usedPercent,
+                resetAt: UsageDateParser.parse(JSONSupport.string(entry["resets_at"]))
+            )
+        }
     }
 
     private static func makeWindow(

@@ -31,6 +31,35 @@ final class ProviderParserTests: XCTestCase {
         XCTAssertEqual(windows[1].remainingPercent, 86)
     }
 
+    func testClaudeParserUsesLimitsArrayPercentages() throws {
+        let response = #"""
+        {"five_hour":{"utilization":10.0,"resets_at":"2026-09-02T00:09:59.661996+00:00"},
+         "seven_day":{"utilization":1.0,"resets_at":"2026-09-08T02:59:59.662029+00:00"},
+         "limits":[
+           {"kind":"session","group":"session","percent":10,"resets_at":"2026-09-02T00:09:59.661996+00:00","scope":null},
+           {"kind":"weekly_all","group":"weekly","percent":1,"resets_at":"2026-09-08T02:59:59.662029+00:00","scope":null},
+           {"kind":"weekly_scoped","group":"weekly","percent":2,"resets_at":"2026-09-08T02:59:59.662417+00:00","scope":{"model":{"id":null,"display_name":"Fable"},"surface":null}}
+         ]}
+        """#
+
+        let windows = try ClaudeUsageClient.parse(Data(response.utf8))
+
+        XCTAssertEqual(windows.map(\.label), ["5h session", "Weekly", "Weekly"])
+        XCTAssertEqual(windows.map(\.scope), [nil, "All models", "Fable"])
+        XCTAssertEqual(windows.map(\.remainingPercent), [90, 99, 98])
+        XCTAssertEqual(Set(windows.map(\.id)).count, 3)
+        XCTAssertTrue(windows.allSatisfy { $0.resetAt != nil })
+    }
+
+    func testClaudeParserLeavesWeeklyUnqualifiedWithoutScopedLimit() throws {
+        let response = #"{"limits":[{"kind":"session","percent":10,"resets_at":"2026-09-02T00:09:59Z","scope":null},{"kind":"weekly_all","percent":1,"resets_at":"2026-09-08T02:59:59Z","scope":null}]}"#
+
+        let windows = try ClaudeUsageClient.parse(Data(response.utf8))
+
+        XCTAssertEqual(windows.map(\.label), ["5h session", "Weekly"])
+        XCTAssertEqual(windows.map(\.scope), [nil, nil])
+    }
+
     func testClaudeParserSupportsFractionalUtilization() throws {
         let response = #"{"five_hour":{"utilization":0.46,"resets_at":"2026-08-31T17:15:00.000000+00:00"},"seven_day":{"utilization":0.98,"resets_at":"2026-09-01T03:04:00Z"}}"#
 
