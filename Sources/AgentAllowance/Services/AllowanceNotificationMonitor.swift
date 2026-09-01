@@ -162,13 +162,13 @@ final class AllowanceNotificationMonitor: @unchecked Sendable {
     ) -> Bool {
         let prevPercent = previous.remainingPercent ?? 0
 
-        // Case 1: Substantial percent jump (e.g. from <=75% back up to >=80%, or increase of >=30%)
+        // Case 1: Substantial percent jump (e.g. from <=75% back up to >=80%, or increase of >=30% reaching >=70%)
         if (prevPercent <= 75 && currentPercent >= 80) || (currentPercent - prevPercent >= 30 && currentPercent >= 70) {
             return true
         }
 
-        // Case 2: Past reset timestamp and percent increased
-        if let prevResetAt = previous.resetAt, now >= prevResetAt, currentPercent > prevPercent {
+        // Case 2: Past reset timestamp and allowance replenished to healthy level
+        if let prevResetAt = previous.resetAt, now >= prevResetAt, currentPercent >= 80 && currentPercent > prevPercent {
             return true
         }
 

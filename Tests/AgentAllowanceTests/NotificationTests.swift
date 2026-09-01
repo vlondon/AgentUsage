@@ -101,24 +101,28 @@ final class NotificationTests: XCTestCase {
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
 
         let store = SettingsStore(userDefaults: userDefaults)
-        var callbackFired = false
+        var timerCallbackCount = 0
         store.onSettingsChanged = {
-            callbackFired = true
+            timerCallbackCount += 1
         }
 
+        // Modifying timer-relevant field fires callback
         store.settings.macNotificationsEnabled = true
-        store.settings.iphoneNotificationsEnabled = true
-        store.settings.ntfyTopic = "agent-alerts-123"
-        store.settings.lowAllowanceThreshold = 15
+        XCTAssertEqual(timerCallbackCount, 1)
 
-        XCTAssertTrue(callbackFired)
+        // Modifying non-timer field does not re-trigger timer callback
+        store.settings.ntfyTopic = "agent-alerts-123"
+        XCTAssertEqual(timerCallbackCount, 1)
+
+        // Modifying interval fires callback
+        store.settings.backgroundRefreshIntervalMinutes = 10
+        XCTAssertEqual(timerCallbackCount, 2)
 
         // Read back in a fresh store instance
         let reloaded = SettingsStore(userDefaults: userDefaults)
         XCTAssertTrue(reloaded.settings.macNotificationsEnabled)
-        XCTAssertTrue(reloaded.settings.iphoneNotificationsEnabled)
         XCTAssertEqual(reloaded.settings.ntfyTopic, "agent-alerts-123")
-        XCTAssertEqual(reloaded.settings.lowAllowanceThreshold, 15)
+        XCTAssertEqual(reloaded.settings.backgroundRefreshIntervalMinutes, 10)
     }
 
     // MARK: - NotificationService & Ntfy Request Tests
@@ -263,6 +267,56 @@ final class NotificationTests: XCTestCase {
         // Repeated evaluation with same state should NOT trigger duplicate notification
         let duplicatePayloads = monitor.evaluate(usages: resetUsage, settings: settings, now: now.addingTimeInterval(3610))
         XCTAssertTrue(duplicatePayloads.isEmpty)
+    }
+
+    func testMonitorExpiredWindowWithTinyBumpDoesNotNotifyReset() {
+        let monitor = AllowanceNotificationMonitor()
+        let settings = NotificationSettings(
+            macNotificationsEnabled: true,
+            notifyOnReset: true
+        )
+
+        let now = Date()
+        let pastResetAt = now.addingTimeInterval(-60) // Expired 1 minute ago
+
+        // Baseline: 10% remaining
+        let initialUsage = [
+            ProviderUsage(
+                provider: .claude,
+                windows: [
+                    AllowanceWindow(id: "session", label: "5h session", remainingPercent: 10, resetAt: pastResetAt)
+                ],
+                isLoading: false
+            )
+        ]
+        _ = monitor.evaluate(usages: initialUsage, settings: settings, now: now)
+
+        // Tiny bump after expired reset time (e.g. 10% -> 12%) without real replenishment: must NOT alert
+        let bumpUsage = [
+            ProviderUsage(
+                provider: .claude,
+                windows: [
+                    AllowanceWindow(id: "session", label: "5h session", remainingPercent: 12, resetAt: pastResetAt)
+                ],
+                isLoading: false
+            )
+        ]
+        let bumpPayloads = monitor.evaluate(usages: bumpUsage, settings: settings, now: now.addingTimeInterval(10))
+        XCTAssertTrue(bumpPayloads.isEmpty, "Tiny bump on expired window should not fire reset notification")
+
+        // Full replenishment (12% -> 100%): must alert
+        let fullRefillUsage = [
+            ProviderUsage(
+                provider: .claude,
+                windows: [
+                    AllowanceWindow(id: "session", label: "5h session", remainingPercent: 100, resetAt: now.addingTimeInterval(5 * 3600))
+                ],
+                isLoading: false
+            )
+        ]
+        let refillPayloads = monitor.evaluate(usages: fullRefillUsage, settings: settings, now: now.addingTimeInterval(20))
+        XCTAssertEqual(refillPayloads.count, 1)
+        XCTAssertEqual(refillPayloads[0].title, "Claude Allowance Reset")
     }
 
     func testMonitorDetectsResetWhenResetAtIsNil() {

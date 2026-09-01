@@ -98,7 +98,7 @@ Agent Allowance supports notifications when your session or weekly allowances re
 
 1. Install the free **ntfy** app on iOS from the App Store.
 2. Open Settings in Agent Allowance (gear icon in footer) and enable **iPhone Notifications**.
-3. Enter a custom unique topic name (e.g. `my-allowance-alerts-8f2a`) in Agent Allowance.
+3. Use the auto-generated private topic name or enter a custom one (e.g. `allowance-a1b2c3d4`).
 4. In the ntfy app on your iPhone, subscribe to that same topic name.
 5. Tap **Send Test Notification** in Settings to confirm delivery!
 

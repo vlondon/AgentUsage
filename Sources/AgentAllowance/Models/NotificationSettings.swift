@@ -103,7 +103,10 @@ final class SettingsStore {
     var settings: NotificationSettings {
         didSet {
             save()
-            onSettingsChanged?()
+            if oldValue.isAnyNotificationEnabled != settings.isAnyNotificationEnabled ||
+               oldValue.backgroundRefreshIntervalMinutes != settings.backgroundRefreshIntervalMinutes {
+                onSettingsChanged?()
+            }
         }
     }
 
