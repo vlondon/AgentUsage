@@ -87,6 +87,25 @@ All percentages mean **allowance remaining**:
 
 Tap the menu-bar gauge to refresh data that is more than a minute old, or use the refresh button for an immediate update.
 
+## Push Notifications
+
+Agent Allowance supports notifications when your session or weekly allowances refresh:
+
+- **macOS Notifications:** Local native notifications via Apple's `UserNotifications` framework.
+- **iPhone Notifications:** Direct push notifications to your iPhone via [ntfy.sh](https://ntfy.sh) (free, open-source, no account required).
+
+### iPhone Setup with ntfy
+
+1. Install the free **ntfy** app on iOS from the App Store.
+2. Open Settings in Agent Allowance (gear icon in footer) and enable **iPhone Notifications**.
+3. Enter a custom unique topic name (e.g. `my-allowance-alerts-8f2a`) in Agent Allowance.
+4. In the ntfy app on your iPhone, subscribe to that same topic name.
+5. Tap **Send Test Notification** in Settings to confirm delivery!
+
+Notification triggers can be configured in Settings for:
+- Allowance resets (when a 5-hour session or weekly pool refreshes)
+- Low allowance alerts (when remaining allowance drops to or below a configurable threshold, e.g. 10%)
+
 ## License
 
 Released under the [MIT License](LICENSE).

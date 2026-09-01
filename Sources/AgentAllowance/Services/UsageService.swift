@@ -72,14 +72,29 @@ struct UsageService: Sendable {
 final class UsageStore {
     private let service: UsageService
     private var refreshTask: Task<Void, Never>?
+    private var backgroundTimerTask: Task<Void, Never>?
+
+    let settingsStore: SettingsStore
+    let notificationService: NotificationService
+    let notificationMonitor: AllowanceNotificationMonitor
 
     var usages: [ProviderUsage]
     var lastUpdated: Date?
     var isRefreshing = false
 
-    init(service: UsageService = UsageService()) {
+    init(
+        service: UsageService = UsageService(),
+        settingsStore: SettingsStore? = nil,
+        notificationService: NotificationService = NotificationService(),
+        notificationMonitor: AllowanceNotificationMonitor = AllowanceNotificationMonitor()
+    ) {
         self.service = service
+        self.settingsStore = settingsStore ?? SettingsStore()
+        self.notificationService = notificationService
+        self.notificationMonitor = notificationMonitor
         self.usages = service.installedProviders.map(ProviderUsage.placeholder)
+
+        startBackgroundTimer()
     }
 
     func refreshIfNeeded() async {
@@ -100,9 +115,15 @@ final class UsageStore {
             usages[index].isLoading = true
         }
 
-        let task = Task { [service] in
+        let task = Task { [service, settingsStore, notificationService, notificationMonitor] in
             let results = await service.fetchAll()
             guard !Task.isCancelled else { return }
+
+            let payloads = notificationMonitor.evaluate(usages: results, settings: settingsStore.settings)
+            for payload in payloads {
+                _ = await notificationService.dispatch(payload: payload, settings: settingsStore.settings)
+            }
+
             usages = results
             lastUpdated = Date()
             isRefreshing = false
@@ -110,5 +131,18 @@ final class UsageStore {
         }
         refreshTask = task
         await task.value
+    }
+
+    private func startBackgroundTimer() {
+        backgroundTimerTask?.cancel()
+        backgroundTimerTask = Task { [weak self] in
+            while !Task.isCancelled {
+                let intervalMinutes = self?.settingsStore.settings.backgroundRefreshIntervalMinutes ?? 5
+                let intervalSeconds = max(60, Double(intervalMinutes) * 60)
+                try? await Task.sleep(nanoseconds: UInt64(intervalSeconds * 1_000_000_000))
+                guard !Task.isCancelled else { break }
+                await self?.refresh()
+            }
+        }
     }
 }
