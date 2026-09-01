@@ -89,12 +89,25 @@ final class UsageStore {
         notificationMonitor: AllowanceNotificationMonitor = AllowanceNotificationMonitor()
     ) {
         self.service = service
-        self.settingsStore = settingsStore ?? SettingsStore()
+        let effectiveSettingsStore = settingsStore ?? SettingsStore()
+        self.settingsStore = effectiveSettingsStore
         self.notificationService = notificationService
         self.notificationMonitor = notificationMonitor
         self.usages = service.installedProviders.map(ProviderUsage.placeholder)
 
-        startBackgroundTimer()
+        effectiveSettingsStore.onSettingsChanged = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.updateBackgroundTimer()
+            }
+        }
+
+        if effectiveSettingsStore.settings.macNotificationsEnabled {
+            Task {
+                _ = await notificationService.requestMacAuthorization()
+            }
+        }
+
+        updateBackgroundTimer()
     }
 
     func refreshIfNeeded() async {
@@ -133,12 +146,17 @@ final class UsageStore {
         await task.value
     }
 
-    private func startBackgroundTimer() {
+    func updateBackgroundTimer() {
         backgroundTimerTask?.cancel()
+        backgroundTimerTask = nil
+
+        guard settingsStore.settings.isAnyNotificationEnabled else { return }
+
+        let intervalMinutes = settingsStore.settings.backgroundRefreshIntervalMinutes
+        let intervalSeconds = max(60, Double(intervalMinutes) * 60)
+
         backgroundTimerTask = Task { [weak self] in
             while !Task.isCancelled {
-                let intervalMinutes = self?.settingsStore.settings.backgroundRefreshIntervalMinutes ?? 5
-                let intervalSeconds = max(60, Double(intervalMinutes) * 60)
                 try? await Task.sleep(nanoseconds: UInt64(intervalSeconds * 1_000_000_000))
                 guard !Task.isCancelled else { break }
                 await self?.refresh()

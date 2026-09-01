@@ -58,6 +58,18 @@ struct NotificationDispatchResult: Equatable, Sendable {
     }
 }
 
+final class NotificationCenterDelegate: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
+    static let shared = NotificationCenterDelegate()
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound, .list])
+    }
+}
+
 protocol NotificationSenderProtocol: Sendable {
     func requestMacAuthorization() async -> Bool
     func checkMacAuthorizationStatus() async -> UNAuthorizationStatus
@@ -70,6 +82,7 @@ struct LiveNotificationSender: NotificationSenderProtocol {
 
     init(urlSession: URLSession = .shared) {
         self.urlSession = urlSession
+        UNUserNotificationCenter.current().delegate = NotificationCenterDelegate.shared
     }
 
     func requestMacAuthorization() async -> Bool {
@@ -89,6 +102,28 @@ struct LiveNotificationSender: NotificationSenderProtocol {
 
     func sendMacNotification(payload: NotificationPayload) async throws {
         let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+
+        switch settings.authorizationStatus {
+        case .denied:
+            throw NSError(
+                domain: "NotificationError",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Notification permission denied in macOS System Settings."]
+            )
+        case .notDetermined:
+            let granted = try await center.requestAuthorization(options: [.alert, .sound])
+            if !granted {
+                throw NSError(
+                    domain: "NotificationError",
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "Notification permission was not granted."]
+                )
+            }
+        default:
+            break
+        }
+
         let content = UNMutableNotificationContent()
         content.title = payload.title
         content.body = payload.body
@@ -127,12 +162,20 @@ struct NotificationService: Sendable {
         topic: String,
         server: String
     ) throws -> URLRequest {
-        let cleanTopic = topic.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard !cleanTopic.isEmpty else {
+        let trimmedTopic = topic.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTopic.isEmpty else {
             throw NSError(
                 domain: "NtfyError",
                 code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "ntfy topic cannot be empty"]
+            )
+        }
+
+        guard trimmedTopic.unicodeScalars.allSatisfy({ NotificationSettings.allowedTopicCharacters.contains($0) }) else {
+            throw NSError(
+                domain: "NtfyError",
+                code: -2,
+                userInfo: [NSLocalizedDescriptionKey: "ntfy topic contains invalid characters. Use letters, numbers, hyphens, and underscores."]
             )
         }
 
@@ -147,11 +190,11 @@ struct NotificationService: Sendable {
             cleanServer.removeLast()
         }
 
-        guard let url = URL(string: "\(cleanServer)/\(cleanTopic)") else {
+        guard let url = URL(string: "\(cleanServer)/\(trimmedTopic)") else {
             throw NSError(
                 domain: "NtfyError",
-                code: -2,
-                userInfo: [NSLocalizedDescriptionKey: "Invalid ntfy URL: \(cleanServer)/\(cleanTopic)"]
+                code: -3,
+                userInfo: [NSLocalizedDescriptionKey: "Invalid ntfy URL: \(cleanServer)/\(trimmedTopic)"]
             )
         }
 
@@ -160,7 +203,7 @@ struct NotificationService: Sendable {
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
 
         let bodyDict: [String: Any] = [
-            "topic": cleanTopic,
+            "topic": trimmedTopic,
             "title": payload.title,
             "message": payload.body,
             "priority": payload.priority,
@@ -200,6 +243,9 @@ struct NotificationService: Sendable {
             if topic.isEmpty {
                 result.iphoneSuccess = false
                 result.iphoneError = "ntfy topic is not set"
+            } else if !settings.isTopicValid {
+                result.iphoneSuccess = false
+                result.iphoneError = "ntfy topic has invalid characters"
             } else {
                 do {
                     try await sender.sendNtfyNotification(

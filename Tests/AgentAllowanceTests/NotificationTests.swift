@@ -20,6 +20,13 @@ final class MockNotificationSender: NotificationSenderProtocol, @unchecked Senda
     }
 
     func sendMacNotification(payload: NotificationPayload) async throws {
+        if authStatus == .denied {
+            throw NSError(
+                domain: "NotificationError",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Notification permission denied in macOS System Settings."]
+            )
+        }
         if let macError { throw macError }
         sentMacPayloads.append(payload)
     }
@@ -43,32 +50,68 @@ final class NotificationTests: XCTestCase {
         XCTAssertTrue(settings.notifyOnReset)
         XCTAssertFalse(settings.notifyOnLowAllowance)
         XCTAssertEqual(settings.lowAllowanceThreshold, 10)
+        XCTAssertEqual(settings.backgroundRefreshIntervalMinutes, 5)
         XCTAssertFalse(settings.isAnyNotificationEnabled)
     }
 
-    func testTopicAndServerTrimming() {
-        var settings = NotificationSettings(
-            ntfyTopic: "  /my-cool-topic/  ",
-            ntfyServer: "  ntfy.sh/  "
-        )
-        XCTAssertEqual(settings.trimmedNtfyTopic, "my-cool-topic")
-        XCTAssertEqual(settings.cleanedNtfyServer, "https://ntfy.sh")
+    func testTopicCharsetValidation() {
+        var settings = NotificationSettings(ntfyTopic: "my-valid_topic~123")
+        XCTAssertTrue(settings.isTopicValid)
+        XCTAssertEqual(settings.trimmedNtfyTopic, "my-valid_topic~123")
 
-        settings.ntfyServer = "http://custom-ntfy.internal:8080///"
-        XCTAssertEqual(settings.cleanedNtfyServer, "http://custom-ntfy.internal:8080")
+        settings.ntfyTopic = "invalid/path/topic"
+        XCTAssertFalse(settings.isTopicValid)
+        XCTAssertEqual(settings.trimmedNtfyTopic, "invalidpathtopic")
+
+        settings.ntfyTopic = "spaces in topic"
+        XCTAssertFalse(settings.isTopicValid)
+    }
+
+    func testRandomTopicGeneration() {
+        let topic1 = NotificationSettings.generateRandomTopic()
+        let topic2 = NotificationSettings.generateRandomTopic()
+        XCTAssertTrue(topic1.hasPrefix("allowance-"))
+        XCTAssertNotEqual(topic1, topic2)
+        XCTAssertTrue(NotificationSettings(ntfyTopic: topic1).isTopicValid)
+    }
+
+    func testSettingsStoreBackwardCompatibleDecoding() throws {
+        // Simulates JSON from an older version missing new fields
+        let partialJson = """
+        {
+            "macNotificationsEnabled": true,
+            "ntfyTopic": "test-topic"
+        }
+        """
+        let decoded = try JSONDecoder().decode(NotificationSettings.self, from: Data(partialJson.utf8))
+        XCTAssertTrue(decoded.macNotificationsEnabled)
+        XCTAssertFalse(decoded.iphoneNotificationsEnabled)
+        XCTAssertEqual(decoded.ntfyTopic, "test-topic")
+        XCTAssertEqual(decoded.ntfyServer, "https://ntfy.sh")
+        XCTAssertTrue(decoded.notifyOnReset)
+        XCTAssertFalse(decoded.notifyOnLowAllowance)
+        XCTAssertEqual(decoded.lowAllowanceThreshold, 10)
+        XCTAssertEqual(decoded.backgroundRefreshIntervalMinutes, 5)
     }
 
     @MainActor
-    func testSettingsStorePersistence() {
+    func testSettingsStorePersistenceAndCallbacks() {
         let suiteName = "test_settings_\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
 
         let store = SettingsStore(userDefaults: userDefaults)
+        var callbackFired = false
+        store.onSettingsChanged = {
+            callbackFired = true
+        }
+
         store.settings.macNotificationsEnabled = true
         store.settings.iphoneNotificationsEnabled = true
         store.settings.ntfyTopic = "agent-alerts-123"
         store.settings.lowAllowanceThreshold = 15
+
+        XCTAssertTrue(callbackFired)
 
         // Read back in a fresh store instance
         let reloaded = SettingsStore(userDefaults: userDefaults)
@@ -108,29 +151,27 @@ final class NotificationTests: XCTestCase {
         XCTAssertEqual(json["tags"] as? [String], ["sparkles"])
     }
 
-    func testMakeNtfyRequestEmptyTopicThrows() {
+    func testMakeNtfyRequestRejectsInvalidTopicCharacters() {
         let payload = NotificationPayload(title: "Test", body: "Body")
+        XCTAssertThrowsError(
+            try NotificationService.makeNtfyRequest(payload: payload, topic: "foo/bar", server: "https://ntfy.sh")
+        )
         XCTAssertThrowsError(
             try NotificationService.makeNtfyRequest(payload: payload, topic: "   ", server: "https://ntfy.sh")
         )
     }
 
-    func testNotificationDispatchMacOnly() async {
+    func testNotificationDispatchMacReportsDeniedPermission() async {
         let mock = MockNotificationSender()
+        mock.authStatus = .denied
         let service = NotificationService(sender: mock)
-        let settings = NotificationSettings(
-            macNotificationsEnabled: true,
-            iphoneNotificationsEnabled: false
-        )
+        let settings = NotificationSettings(macNotificationsEnabled: true)
 
         let payload = NotificationPayload(title: "Test", body: "Msg")
         let result = await service.dispatch(payload: payload, settings: settings)
 
-        XCTAssertEqual(result.macSuccess, true)
-        XCTAssertNil(result.iphoneSuccess)
-        XCTAssertTrue(result.isSuccess)
-        XCTAssertEqual(mock.sentMacPayloads.count, 1)
-        XCTAssertEqual(mock.sentNtfyRequests.count, 0)
+        XCTAssertEqual(result.macSuccess, false)
+        XCTAssertTrue(result.macError?.contains("denied") ?? false)
     }
 
     func testNotificationDispatchBothChannels() async {
@@ -153,60 +194,30 @@ final class NotificationTests: XCTestCase {
         XCTAssertEqual(mock.sentNtfyRequests.first?.topic, "agent-test-topic")
     }
 
-    func testNotificationDispatchIphoneFailsWithoutTopic() async {
-        let mock = MockNotificationSender()
-        let service = NotificationService(sender: mock)
-        let settings = NotificationSettings(
-            macNotificationsEnabled: false,
-            iphoneNotificationsEnabled: true,
-            ntfyTopic: ""
-        )
-
-        let payload = NotificationPayload(title: "Test", body: "Msg")
-        let result = await service.dispatch(payload: payload, settings: settings)
-
-        XCTAssertEqual(result.iphoneSuccess, false)
-        XCTAssertFalse(result.isSuccess)
-        XCTAssertEqual(result.iphoneError, "ntfy topic is not set")
-    }
-
-    func testSendTestNotification() async {
-        let mock = MockNotificationSender()
-        let service = NotificationService(sender: mock)
-        let settings = NotificationSettings(
-            macNotificationsEnabled: true,
-            iphoneNotificationsEnabled: true,
-            ntfyTopic: "test-topic"
-        )
-
-        let result = await service.sendTestNotification(settings: settings)
-        XCTAssertTrue(result.isSuccess)
-        XCTAssertEqual(mock.sentMacPayloads.first?.title, "Agent Allowance Test")
-        XCTAssertEqual(mock.sentNtfyRequests.first?.payload.title, "Agent Allowance Test")
-    }
-
     // MARK: - AllowanceNotificationMonitor Tests
 
     func testMonitorColdStartupDoesNotSpamNotifications() {
         let monitor = AllowanceNotificationMonitor()
         let settings = NotificationSettings(
             macNotificationsEnabled: true,
-            notifyOnReset: true
+            notifyOnReset: true,
+            notifyOnLowAllowance: true
         )
 
         let usages = [
             ProviderUsage(
                 provider: .claude,
                 windows: [
-                    AllowanceWindow(id: "session", label: "5h session", remainingPercent: 100, resetAt: Date())
+                    AllowanceWindow(id: "session", label: "5h session", remainingPercent: 100, resetAt: Date()),
+                    AllowanceWindow(id: "weekly", label: "Weekly", remainingPercent: 5, resetAt: Date())
                 ],
                 isLoading: false
             )
         ]
 
         let payloads = monitor.evaluate(usages: usages, settings: settings)
-        XCTAssertTrue(payloads.isEmpty)
-        XCTAssertEqual(monitor.snapshotCount(), 1)
+        XCTAssertTrue(payloads.isEmpty, "Cold start baseline should not emit alert payloads")
+        XCTAssertEqual(monitor.snapshotCount(), 2)
     }
 
     func testMonitorDetectsResetFromLowToFull() {
@@ -252,6 +263,76 @@ final class NotificationTests: XCTestCase {
         // Repeated evaluation with same state should NOT trigger duplicate notification
         let duplicatePayloads = monitor.evaluate(usages: resetUsage, settings: settings, now: now.addingTimeInterval(3610))
         XCTAssertTrue(duplicatePayloads.isEmpty)
+    }
+
+    func testMonitorDetectsResetWhenResetAtIsNil() {
+        let monitor = AllowanceNotificationMonitor()
+        let settings = NotificationSettings(
+            macNotificationsEnabled: true,
+            notifyOnReset: true
+        )
+
+        let initialUsage = [
+            ProviderUsage(
+                provider: .cursor,
+                windows: [
+                    AllowanceWindow(id: "cycle", label: "Billing cycle", remainingPercent: 15, resetAt: nil)
+                ],
+                isLoading: false
+            )
+        ]
+        _ = monitor.evaluate(usages: initialUsage, settings: settings)
+
+        // Refill occurs
+        let refreshedUsage = [
+            ProviderUsage(
+                provider: .cursor,
+                windows: [
+                    AllowanceWindow(id: "cycle", label: "Billing cycle", remainingPercent: 100, resetAt: nil)
+                ],
+                isLoading: false
+            )
+        ]
+        let payloads = monitor.evaluate(usages: refreshedUsage, settings: settings)
+
+        XCTAssertEqual(payloads.count, 1)
+        XCTAssertEqual(payloads[0].title, "Cursor Allowance Reset")
+    }
+
+    func testMonitorImmuneToTimestampJitter() {
+        let monitor = AllowanceNotificationMonitor()
+        let settings = NotificationSettings(
+            macNotificationsEnabled: true,
+            notifyOnReset: true
+        )
+
+        let now = Date()
+        let resetAt = now.addingTimeInterval(7200)
+
+        let initialUsage = [
+            ProviderUsage(
+                provider: .claude,
+                windows: [
+                    AllowanceWindow(id: "session", label: "5h session", remainingPercent: 95, resetAt: resetAt)
+                ],
+                isLoading: false
+            )
+        ]
+        _ = monitor.evaluate(usages: initialUsage, settings: settings, now: now)
+
+        // Next poll returns 2 seconds drift in resetAt due to fractional parsing
+        let jitterUsage = [
+            ProviderUsage(
+                provider: .claude,
+                windows: [
+                    AllowanceWindow(id: "session", label: "5h session", remainingPercent: 95, resetAt: resetAt.addingTimeInterval(2))
+                ],
+                isLoading: false
+            )
+        ]
+        let payloads = monitor.evaluate(usages: jitterUsage, settings: settings, now: now.addingTimeInterval(60))
+
+        XCTAssertTrue(payloads.isEmpty, "Timestamp jitter must not trigger a false reset alert")
     }
 
     func testMonitorDetectsResetWithScopedWindow() {

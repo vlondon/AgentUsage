@@ -11,6 +11,8 @@ struct NotificationSettings: Codable, Equatable, Sendable {
     var lowAllowanceThreshold: Int
     var backgroundRefreshIntervalMinutes: Int
 
+    static let allowedTopicCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_~")
+
     init(
         macNotificationsEnabled: Bool = false,
         iphoneNotificationsEnabled: Bool = false,
@@ -31,12 +33,42 @@ struct NotificationSettings: Codable, Equatable, Sendable {
         self.backgroundRefreshIntervalMinutes = backgroundRefreshIntervalMinutes
     }
 
+    enum CodingKeys: String, CodingKey {
+        case macNotificationsEnabled
+        case iphoneNotificationsEnabled
+        case ntfyTopic
+        case ntfyServer
+        case notifyOnReset
+        case notifyOnLowAllowance
+        case lowAllowanceThreshold
+        case backgroundRefreshIntervalMinutes
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.macNotificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .macNotificationsEnabled) ?? false
+        self.iphoneNotificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .iphoneNotificationsEnabled) ?? false
+        self.ntfyTopic = try container.decodeIfPresent(String.self, forKey: .ntfyTopic) ?? ""
+        self.ntfyServer = try container.decodeIfPresent(String.self, forKey: .ntfyServer) ?? "https://ntfy.sh"
+        self.notifyOnReset = try container.decodeIfPresent(Bool.self, forKey: .notifyOnReset) ?? true
+        self.notifyOnLowAllowance = try container.decodeIfPresent(Bool.self, forKey: .notifyOnLowAllowance) ?? false
+        self.lowAllowanceThreshold = try container.decodeIfPresent(Int.self, forKey: .lowAllowanceThreshold) ?? 10
+        self.backgroundRefreshIntervalMinutes = try container.decodeIfPresent(Int.self, forKey: .backgroundRefreshIntervalMinutes) ?? 5
+    }
+
     var isAnyNotificationEnabled: Bool {
         macNotificationsEnabled || iphoneNotificationsEnabled
     }
 
     var trimmedNtfyTopic: String {
-        ntfyTopic.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let trimmed = ntfyTopic.trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(trimmed.unicodeScalars.filter { Self.allowedTopicCharacters.contains($0) })
+    }
+
+    var isTopicValid: Bool {
+        let topic = ntfyTopic.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !topic.isEmpty else { return false }
+        return topic.unicodeScalars.allSatisfy { Self.allowedTopicCharacters.contains($0) }
     }
 
     var cleanedNtfyServer: String {
@@ -52,6 +84,12 @@ struct NotificationSettings: Codable, Equatable, Sendable {
         }
         return server
     }
+
+    static func generateRandomTopic() -> String {
+        let chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+        let randomSuffix = String((0..<8).compactMap { _ in chars.randomElement() })
+        return "allowance-\(randomSuffix)"
+    }
 }
 
 @MainActor
@@ -60,9 +98,12 @@ final class SettingsStore {
     private static let userDefaultsKey = "com.vlondon.AgentAllowance.NotificationSettings"
     private let userDefaults: UserDefaults
 
+    var onSettingsChanged: (@Sendable () -> Void)?
+
     var settings: NotificationSettings {
         didSet {
             save()
+            onSettingsChanged?()
         }
     }
 

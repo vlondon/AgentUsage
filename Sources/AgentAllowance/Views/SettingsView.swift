@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UserNotifications
 
@@ -42,7 +43,7 @@ struct SettingsView: View {
 
             footer
         }
-        .frame(width: 440, height: 530)
+        .frame(width: 460, height: 560)
         .task {
             macPermissionStatus = await notificationService.checkMacAuthorizationStatus()
         }
@@ -80,7 +81,7 @@ struct SettingsView: View {
             }
 
             if settingsStore.settings.macNotificationsEnabled {
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     Circle()
                         .fill(macPermissionStatus == .authorized ? Color.green : Color.orange)
                         .frame(width: 7, height: 7)
@@ -93,6 +94,14 @@ struct SettingsView: View {
                         Text("Permission denied in System Settings")
                             .font(.caption2)
                             .foregroundStyle(Color.red)
+
+                        Button("Open System Settings") {
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.notifications") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                        .font(.caption2)
+                        .buttonStyle(.link)
                     } else {
                         Text("Permission not determined")
                             .font(.caption2)
@@ -116,6 +125,11 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .onChange(of: settingsStore.settings.iphoneNotificationsEnabled) { _, newValue in
+                if newValue && settingsStore.settings.trimmedNtfyTopic.isEmpty {
+                    settingsStore.settings.ntfyTopic = NotificationSettings.generateRandomTopic()
+                }
+            }
 
             if settingsStore.settings.iphoneNotificationsEnabled {
                 VStack(alignment: .leading, spacing: 6) {
@@ -124,16 +138,31 @@ struct SettingsView: View {
                         .fontWeight(.medium)
                         .foregroundStyle(.secondary)
 
-                    TextField("e.g. my-secret-allowance-topic", text: $settingsStore.settings.ntfyTopic)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.callout)
+                    HStack(spacing: 8) {
+                        TextField("e.g. allowance-a1b2c3d4", text: $settingsStore.settings.ntfyTopic)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.callout)
+
+                        Button {
+                            settingsStore.settings.ntfyTopic = NotificationSettings.generateRandomTopic()
+                        } label: {
+                            Image(systemName: "dice")
+                        }
+                        .help("Generate a random private topic name")
+                    }
+
+                    if !settingsStore.settings.ntfyTopic.isEmpty && !settingsStore.settings.isTopicValid {
+                        Text("Topic may only contain letters, numbers, hyphens, and underscores.")
+                            .font(.caption2)
+                            .foregroundStyle(Color.red)
+                    }
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Setup steps:")
                             .font(.caption2)
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
-                        Text("1. Install the free ntfy app on iOS from App Store.\n2. Subscribe to the same topic name as above.\n3. Tip: Pick a unique random topic name to keep alerts private.")
+                        Text("1. Install the free **ntfy** app on iOS from App Store.\n2. Subscribe to the same topic name as above.\n3. Keep your topic name unique/private to keep alerts secure.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -158,7 +187,7 @@ struct SettingsView: View {
 
     private var triggersSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Notification Triggers")
+            Text("Notification Triggers & Schedule")
                 .font(.subheadline)
                 .fontWeight(.medium)
 
@@ -181,6 +210,22 @@ struct SettingsView: View {
                     }
                     .pickerStyle(.segmented)
                     .frame(width: 180)
+                }
+                .padding(.leading, 24)
+            }
+
+            if settingsStore.settings.isAnyNotificationEnabled {
+                HStack {
+                    Text("Background check interval:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker("", selection: $settingsStore.settings.backgroundRefreshIntervalMinutes) {
+                        Text("2 min").tag(2)
+                        Text("5 min").tag(5)
+                        Text("10 min").tag(10)
+                        Text("15 min").tag(15)
+                    }
+                    .frame(width: 110)
                 }
                 .padding(.leading, 24)
             }
@@ -246,6 +291,7 @@ struct SettingsView: View {
             isTesting = false
             testIsSuccess = result.isSuccess
             testStatus = result.summaryDescription
+            macPermissionStatus = await notificationService.checkMacAuthorizationStatus()
         }
     }
 }

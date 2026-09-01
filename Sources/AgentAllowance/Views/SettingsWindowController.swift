@@ -13,7 +13,7 @@ final class SettingsWindowController {
         settingsStore: SettingsStore,
         notificationService: NotificationService = NotificationService()
     ) {
-        if let existing = window, existing.isVisible {
+        if let existing = window {
             existing.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
@@ -42,6 +42,6 @@ final class SettingsWindowController {
     }
 
     func close() {
-        window?.close()
+        window?.orderOut(nil)
     }
 }
