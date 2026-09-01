@@ -35,7 +35,7 @@ Allowance never asks for credentials and never stores them.
 | Provider | Install | Sign in | Allowance shown |
 |---|---|---|---|
 | **Codex** | `codex` CLI | `codex login` | 5-hour session and weekly |
-| **Claude** | `claude` CLI (Claude Code) | `claude login` | 5-hour session and weekly |
+| **Claude** | `claude` CLI (Claude Code) | `claude login` | 5-hour session and weekly, per model where the plan has one |
 | **Cursor** | Cursor desktop app | Sign in inside Cursor | Current billing cycle |
 | **Devin** | Devin desktop app | Sign in inside Devin | Daily, weekly, or billing cycle |
 | **Grok Build** | `grok` CLI | `grok login` | Weekly |
@@ -49,6 +49,10 @@ Provider-specific notes:
   `Claude Code-credentials` Keychain item. A normal Claude Code sign-in is
   enough — the environment variable is only useful when running from a shell,
   since an app launched from Finder inherits no shell environment.
+- **Claude** shows every limit the usage endpoint reports for your plan: the
+  5-hour session, the weekly all-models pool, and any model-scoped weekly pool
+  (shown as a second `Weekly` row named after the model). Plans with a single
+  weekly pool keep one unqualified `Weekly` row.
 - **Grok Bot** decrypts its `Grok Bot Safe Storage` Keychain item, so macOS asks
   once whether Agent Allowance may use it. Allow it, or Grok Bot stays blank.
 - **Devin** has no live endpoint; it reads the status Devin cached at its last
