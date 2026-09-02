@@ -13,7 +13,7 @@ struct NotificationPayload: Equatable, Sendable {
         title: String,
         body: String,
         identifier: String = UUID().uuidString,
-        priority: Int = 3,
+        priority: Int = 4,
         tags: [String] = ["bell"]
     ) {
         self.title = title
@@ -218,31 +218,27 @@ struct NotificationService: Sendable {
             cleanServer.removeLast()
         }
 
-        guard let url = URL(string: cleanServer) else {
+        guard let url = URL(string: "\(cleanServer)/\(trimmedTopic)") else {
             throw NSError(
                 domain: "NtfyError",
                 code: -3,
-                userInfo: [NSLocalizedDescriptionKey: "Invalid ntfy URL: \(cleanServer)"]
+                userInfo: [NSLocalizedDescriptionKey: "Invalid ntfy URL: \(cleanServer)/\(trimmedTopic)"]
             )
         }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
-
-        var bodyDict: [String: Any] = [
-            "topic": trimmedTopic,
-            "title": payload.title,
-            "message": payload.body,
-            "priority": payload.priority,
-            "tags": payload.tags
-        ]
-
+        request.setValue("AgentAllowance/1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue(payload.title, forHTTPHeaderField: "Title")
+        request.setValue("\(payload.priority)", forHTTPHeaderField: "Priority")
+        if !payload.tags.isEmpty {
+            request.setValue(payload.tags.joined(separator: ","), forHTTPHeaderField: "Tags")
+        }
         if let delaySeconds, delaySeconds > 0 {
-            bodyDict["delay"] = "\(Int(delaySeconds))s"
+            request.setValue("\(Int(delaySeconds))s", forHTTPHeaderField: "Delay")
         }
 
-        request.httpBody = try JSONSerialization.data(withJSONObject: bodyDict, options: [])
+        request.httpBody = payload.body.data(using: .utf8)
         return request
     }
 
@@ -302,7 +298,7 @@ struct NotificationService: Sendable {
         let payload = NotificationPayload(
             title: "Agent Allowance Test",
             body: "Notifications are working! You will receive alerts when your agent allowances reset.",
-            priority: 3,
+            priority: 4,
             tags: ["sparkles", "bell"]
         )
         return await dispatch(payload: payload, settings: settings)
@@ -319,7 +315,7 @@ struct NotificationService: Sendable {
         let payload = NotificationPayload(
             title: title,
             body: body,
-            priority: 3,
+            priority: 4,
             tags: ["hourglass", "bell"]
         )
         return await dispatch(payload: payload, delaySeconds: delaySeconds, settings: testSettings)
@@ -336,7 +332,7 @@ struct NotificationService: Sendable {
         let payload = NotificationPayload(
             title: title,
             body: body,
-            priority: 3,
+            priority: 4,
             tags: ["hourglass", "bell"]
         )
         return await dispatch(payload: payload, delaySeconds: delaySeconds, settings: testSettings)
@@ -346,7 +342,7 @@ struct NotificationService: Sendable {
         let payload = NotificationPayload(
             title: "Agent Allowance (10s Delay)",
             body: "10-second background notification received successfully!",
-            priority: 3,
+            priority: 4,
             tags: ["hourglass", "sparkles"]
         )
         return await dispatch(payload: payload, delaySeconds: seconds, settings: settings)

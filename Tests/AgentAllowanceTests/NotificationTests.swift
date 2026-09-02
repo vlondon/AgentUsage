@@ -141,18 +141,12 @@ final class NotificationTests: XCTestCase {
             server: "https://ntfy.sh"
         )
 
-        XCTAssertEqual(request.url?.absoluteString, "https://ntfy.sh")
+        XCTAssertEqual(request.url?.absoluteString, "https://ntfy.sh/my-topic")
         XCTAssertEqual(request.httpMethod, "POST")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json; charset=utf-8")
-
-        let bodyData = try XCTUnwrap(request.httpBody)
-        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
-
-        XCTAssertEqual(json["topic"] as? String, "my-topic")
-        XCTAssertEqual(json["title"] as? String, "Claude Allowance Reset")
-        XCTAssertEqual(json["message"] as? String, "Your 5-hour session pool has fully refreshed.")
-        XCTAssertEqual(json["priority"] as? Int, 3)
-        XCTAssertEqual(json["tags"] as? [String], ["sparkles"])
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Title"), "Claude Allowance Reset")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Priority"), "3")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Tags"), "sparkles")
+        XCTAssertEqual(String(data: request.httpBody ?? Data(), encoding: .utf8), "Your 5-hour session pool has fully refreshed.")
     }
 
     func testMakeNtfyRequestRejectsInvalidTopicCharacters() {

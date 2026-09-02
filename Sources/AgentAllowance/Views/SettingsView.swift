@@ -17,6 +17,7 @@ struct SettingsView: View {
     @State private var iphoneTestStatus: String?
     @State private var isIphoneTesting = false
     @State private var iphoneTestIsSuccess = false
+    @State private var isCopied = false
 
     @State private var macPermissionStatus: UNAuthorizationStatus = .notDetermined
     @Environment(\.dismiss) private var dismiss
@@ -52,7 +53,7 @@ struct SettingsView: View {
 
             footer
         }
-        .frame(width: 480, height: 610)
+        .frame(width: 500, height: 640)
         .onAppear {
             refreshPermissionStatus()
         }
@@ -199,7 +200,7 @@ struct SettingsView: View {
                         .fontWeight(.medium)
                         .foregroundStyle(.secondary)
 
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         TextField("e.g. allowance-a1b2c3d4", text: $settingsStore.settings.ntfyTopic)
                             .textFieldStyle(.roundedBorder)
                             .font(.callout)
@@ -210,6 +211,13 @@ struct SettingsView: View {
                             Image(systemName: "dice")
                         }
                         .help("Generate a random private topic name")
+
+                        Button {
+                            copyTopicToClipboard()
+                        } label: {
+                            Image(systemName: isCopied ? "checkmark" : "doc.on.doc")
+                        }
+                        .help("Copy topic to clipboard")
 
                         Button {
                             sendIphoneTest(delay: nil)
@@ -251,16 +259,33 @@ struct SettingsView: View {
                             .foregroundStyle(Color.red)
                     }
 
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 5) {
                         Text("Setup steps:")
                             .font(.caption2)
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
-                        Text("1. Install the free **ntfy** app on iOS from App Store.\n2. Subscribe to the same topic name as above.\n3. Keep your topic name unique/private to keep alerts secure.")
+                        Text("1. Install the free **ntfy** app on iOS from the App Store.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+                        Text("2. Open the ntfy app, tap **+**, and subscribe to topic: **\(settingsStore.settings.trimmedNtfyTopic.isEmpty ? "your-topic" : settingsStore.settings.trimmedNtfyTopic)**")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("3. Make sure Notifications are allowed in iOS Settings -> ntfy.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+
+                        if !settingsStore.settings.trimmedNtfyTopic.isEmpty {
+                            Button("View Live Web Feed (\(settingsStore.settings.cleanedNtfyServer)/\(settingsStore.settings.trimmedNtfyTopic))") {
+                                if let url = URL(string: "\(settingsStore.settings.cleanedNtfyServer)/\(settingsStore.settings.trimmedNtfyTopic)") {
+                                    NSWorkspace.shared.open(url)
+                                }
+                            }
+                            .font(.caption2)
+                            .buttonStyle(.link)
+                            .padding(.top, 2)
+                        }
                     }
-                    .padding(8)
+                    .padding(10)
                     .background(Color.secondary.opacity(0.08))
                     .cornerRadius(6)
 
@@ -276,6 +301,17 @@ struct SettingsView: View {
                 }
                 .padding(.leading, 24)
             }
+        }
+    }
+
+    private func copyTopicToClipboard() {
+        let topic = settingsStore.settings.trimmedNtfyTopic
+        guard !topic.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(topic, forType: .string)
+        isCopied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            isCopied = false
         }
     }
 
