@@ -116,7 +116,7 @@ struct UsagePopoverView: View {
                 NSApplication.shared.terminate(nil)
             } label: {
                 Text("Quit")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Color(red: 0.68, green: 0.22, blue: 0.22))
             }
             .buttonStyle(.borderless)
             .keyboardShortcut("q")
