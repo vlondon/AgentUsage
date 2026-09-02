@@ -459,6 +459,43 @@ final class NotificationTests: XCTestCase {
         XCTAssertEqual(refillPayloads[0].title, "Claude Allowance Reset")
     }
 
+    func testMonitorNearEmptyAllowanceRefillNotifiesReset() {
+        let monitor = AllowanceNotificationMonitor()
+        let settings = NotificationSettings(
+            macNotificationsEnabled: true,
+            notifyOnReset: true
+        )
+
+        let now = Date()
+        let initialResetAt = now.addingTimeInterval(1800)
+
+        // Baseline: 2% remaining (near-empty poll gap case where 0% was hit between polls)
+        let initialUsage = [
+            ProviderUsage(
+                provider: .claude,
+                windows: [
+                    AllowanceWindow(id: "session", label: "5h session", remainingPercent: 2, resetAt: initialResetAt)
+                ],
+                isLoading: false
+            )
+        ]
+        _ = monitor.evaluate(usages: initialUsage, settings: settings, now: now)
+
+        // Refill occurs to 100%
+        let refillUsage = [
+            ProviderUsage(
+                provider: .claude,
+                windows: [
+                    AllowanceWindow(id: "session", label: "5h session", remainingPercent: 100, resetAt: now.addingTimeInterval(5 * 3600))
+                ],
+                isLoading: false
+            )
+        ]
+        let payloads = monitor.evaluate(usages: refillUsage, settings: settings, now: now.addingTimeInterval(1805))
+        XCTAssertEqual(payloads.count, 1)
+        XCTAssertEqual(payloads[0].title, "Claude Allowance Reset")
+    }
+
     func testMonitorDetectsResetWhenResetAtIsNil() {
         let monitor = AllowanceNotificationMonitor()
         let settings = NotificationSettings(

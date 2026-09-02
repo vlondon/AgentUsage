@@ -64,7 +64,7 @@ final class AllowanceNotificationMonitor: @unchecked Sendable {
                 guard let previous = snapshots[key] else {
                     // First time encountering this window (cold baseline):
                     let initialPercent = window.remainingPercent ?? 100
-                    let isExhausted = initialPercent <= 0
+                    let isExhausted = initialPercent <= 5 || Int(initialPercent.rounded()) == 0
                     let snapshot = WindowSnapshot(
                         provider: usage.provider,
                         windowId: window.id,
@@ -83,23 +83,17 @@ final class AllowanceNotificationMonitor: @unchecked Sendable {
                 var currentSnapshot = previous
 
                 if let currPercent = window.remainingPercent {
-                    // If allowance reached 0%, mark it as exhausted and re-arm for reset notification
-                    if currPercent <= 0 {
+                    // If allowance reached 0% or near-empty (<= 5% or rounded 0%), mark as exhausted
+                    if currPercent <= 5 || Int(currPercent.rounded()) == 0 {
                         currentSnapshot.wasExhausted = true
                         currentSnapshot.notifiedResetThisCycle = false
                     }
 
                     // Check for reset notification:
-                    // ONLY fire if this window had 0% left (wasExhausted) and has now reset (> 0%)
+                    // Fire if this window was exhausted (<= 5% / 0% left) and has now replenished
                     if settings.notifyOnReset && settings.isAnyNotificationEnabled && !currentSnapshot.notifiedResetThisCycle && currentSnapshot.wasExhausted {
-                        let isReset = isResetConditionMet(
-                            previous: previous,
-                            currentPercent: currPercent,
-                            currentResetAt: window.resetAt,
-                            now: now
-                        )
-
-                        if isReset {
+                        let prevPercent = previous.remainingPercent ?? 0
+                        if currPercent > 5 && (currPercent >= 50 || currPercent - prevPercent >= 30) {
                             let scopeSuffix = window.scope.map { " (\($0))" } ?? ""
                             let rounded = Int(currPercent.rounded())
                             let title = "\(usage.provider.rawValue) Allowance Reset"
@@ -155,20 +149,6 @@ final class AllowanceNotificationMonitor: @unchecked Sendable {
         }
 
         return payloads
-    }
-
-    private func isResetConditionMet(
-        previous: WindowSnapshot,
-        currentPercent: Double,
-        currentResetAt: Date?,
-        now: Date
-    ) -> Bool {
-        // Since wasExhausted is true (was at 0%), any replenishment to > 0% is a reset
-        if currentPercent > 0 {
-            return true
-        }
-
-        return false
     }
 
     func snapshotCount() -> Int {
