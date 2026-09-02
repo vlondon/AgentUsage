@@ -6,8 +6,8 @@ import XCTest
 final class MockNotificationSender: NotificationSenderProtocol, @unchecked Sendable {
     var authResult = true
     var authStatus: UNAuthorizationStatus = .authorized
-    var sentMacPayloads: [NotificationPayload] = []
-    var sentNtfyRequests: [(payload: NotificationPayload, topic: String, server: String)] = []
+    var sentMacPayloads: [(payload: NotificationPayload, delay: TimeInterval?)] = []
+    var sentNtfyRequests: [(payload: NotificationPayload, topic: String, server: String, delay: TimeInterval?)] = []
     var macError: (any Error)?
     var ntfyError: (any Error)?
 
@@ -19,7 +19,7 @@ final class MockNotificationSender: NotificationSenderProtocol, @unchecked Senda
         authStatus
     }
 
-    func sendMacNotification(payload: NotificationPayload) async throws {
+    func sendMacNotification(payload: NotificationPayload, delaySeconds: TimeInterval? = nil) async throws {
         if authStatus == .denied {
             throw NSError(
                 domain: "NotificationError",
@@ -28,12 +28,12 @@ final class MockNotificationSender: NotificationSenderProtocol, @unchecked Senda
             )
         }
         if let macError { throw macError }
-        sentMacPayloads.append(payload)
+        sentMacPayloads.append((payload, delaySeconds))
     }
 
-    func sendNtfyNotification(payload: NotificationPayload, topic: String, server: String) async throws {
+    func sendNtfyNotification(payload: NotificationPayload, topic: String, server: String, delaySeconds: TimeInterval? = nil) async throws {
         if let ntfyError { throw ntfyError }
-        sentNtfyRequests.append((payload, topic, server))
+        sentNtfyRequests.append((payload, topic, server, delaySeconds))
     }
 }
 
@@ -468,5 +468,22 @@ final class NotificationTests: XCTestCase {
         // Repeating low usage without recovering does not trigger duplicate
         let repeatPayloads = monitor.evaluate(usages: lowUsage, settings: settings, now: now.addingTimeInterval(120))
         XCTAssertTrue(repeatPayloads.isEmpty)
+    }
+
+    func testNotificationDispatchWithDelay() async {
+        let mock = MockNotificationSender()
+        let service = NotificationService(sender: mock)
+        let settings = NotificationSettings(
+            macNotificationsEnabled: true,
+            iphoneNotificationsEnabled: true,
+            ntfyTopic: "delayed-topic"
+        )
+
+        let result = await service.sendTestNotificationWithDelay(seconds: 10, settings: settings)
+        XCTAssertTrue(result.isSuccess)
+        XCTAssertEqual(mock.sentMacPayloads.count, 1)
+        XCTAssertEqual(mock.sentMacPayloads.first?.delay, 10)
+        XCTAssertEqual(mock.sentNtfyRequests.count, 1)
+        XCTAssertEqual(mock.sentNtfyRequests.first?.delay, 10)
     }
 }

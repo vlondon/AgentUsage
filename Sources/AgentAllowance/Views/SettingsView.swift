@@ -52,7 +52,7 @@ struct SettingsView: View {
 
             footer
         }
-        .frame(width: 460, height: 580)
+        .frame(width: 480, height: 610)
         .onAppear {
             refreshPermissionStatus()
         }
@@ -128,18 +128,27 @@ struct SettingsView: View {
                         Spacer()
 
                         Button {
-                            sendMacTest()
+                            sendMacTest(delay: nil)
                         } label: {
                             if isMacTesting {
                                 ProgressView()
                                     .controlSize(.small)
                                     .frame(width: 12, height: 12)
                             } else {
-                                Text("Test Mac Alert")
+                                Text("Test Mac")
                             }
                         }
                         .controlSize(.small)
                         .disabled(isMacTesting)
+
+                        Button {
+                            sendMacTest(delay: 10)
+                        } label: {
+                            Text("Test in 10s")
+                        }
+                        .controlSize(.small)
+                        .disabled(isMacTesting)
+                        .help("Fires notification in 10 seconds so you can close this window to test background delivery")
                     }
 
                     if let macTestStatus {
@@ -203,7 +212,7 @@ struct SettingsView: View {
                         .help("Generate a random private topic name")
 
                         Button {
-                            sendIphoneTest()
+                            sendIphoneTest(delay: nil)
                         } label: {
                             if isIphoneTesting {
                                 ProgressView()
@@ -215,6 +224,15 @@ struct SettingsView: View {
                         }
                         .controlSize(.small)
                         .disabled(isIphoneTesting || settingsStore.settings.trimmedNtfyTopic.isEmpty || !settingsStore.settings.isTopicValid)
+
+                        Button {
+                            sendIphoneTest(delay: 10)
+                        } label: {
+                            Text("Test in 10s")
+                        }
+                        .controlSize(.small)
+                        .disabled(isIphoneTesting || settingsStore.settings.trimmedNtfyTopic.isEmpty || !settingsStore.settings.isTopicValid)
+                        .help("Sends an iPhone push scheduled to arrive in 10 seconds")
                     }
 
                     if let iphoneTestStatus {
@@ -309,22 +327,36 @@ struct SettingsView: View {
     }
 
     private var testSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Test Notifications")
+                .font(.subheadline)
+                .fontWeight(.medium)
+
+            HStack(spacing: 10) {
                 Button {
-                    sendOverallTest()
+                    sendOverallTest(delay: nil)
                 } label: {
                     if isOverallTesting {
                         ProgressView()
                             .controlSize(.small)
                             .frame(width: 14, height: 14)
                     } else {
-                        Image(systemName: "paperplane")
+                        Image(systemName: "paperplane.fill")
                     }
-                    Text("Send Test Notification (All Enabled)")
+                    Text("Send Test Now")
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(isOverallTesting || !settingsStore.settings.isAnyNotificationEnabled)
+
+                Button {
+                    sendOverallTest(delay: 10)
+                } label: {
+                    Image(systemName: "timer")
+                    Text("Schedule in 10s (Background Test)")
+                }
+                .buttonStyle(.bordered)
+                .disabled(isOverallTesting || !settingsStore.settings.isAnyNotificationEnabled)
+                .help("Schedules notification to fire in 10 seconds. Close popover to test background banner delivery!")
 
                 Spacer()
             }
@@ -358,43 +390,51 @@ struct SettingsView: View {
         .padding(.vertical, 12)
     }
 
-    private func sendMacTest() {
+    private func sendMacTest(delay: TimeInterval?) {
         guard !isMacTesting else { return }
         isMacTesting = true
         macTestStatus = nil
 
         Task {
-            let result = await notificationService.sendTestMacNotification()
+            let result = await notificationService.sendTestMacNotification(delaySeconds: delay)
             isMacTesting = false
             macTestIsSuccess = result.macSuccess == true
-            macTestStatus = result.macSuccess == true ? "Mac notification sent successfully!" : (result.macError ?? "Failed to send Mac alert")
+            let suffix = delay != nil ? " (will fire in \(Int(delay!))s)" : ""
+            macTestStatus = result.macSuccess == true ? "Mac notification scheduled\(suffix)!" : (result.macError ?? "Failed to send Mac alert")
             macPermissionStatus = await notificationService.checkMacAuthorizationStatus()
         }
     }
 
-    private func sendIphoneTest() {
+    private func sendIphoneTest(delay: TimeInterval?) {
         guard !isIphoneTesting else { return }
         isIphoneTesting = true
         iphoneTestStatus = nil
 
         Task {
-            let result = await notificationService.sendTestIphoneNotification(settings: settingsStore.settings)
+            let result = await notificationService.sendTestIphoneNotification(delaySeconds: delay, settings: settingsStore.settings)
             isIphoneTesting = false
             iphoneTestIsSuccess = result.iphoneSuccess == true
-            iphoneTestStatus = result.iphoneSuccess == true ? "iPhone test push sent to ntfy!" : (result.iphoneError ?? "Failed to send iPhone push")
+            let suffix = delay != nil ? " (will deliver in \(Int(delay!))s)" : ""
+            iphoneTestStatus = result.iphoneSuccess == true ? "iPhone test push sent to ntfy\(suffix)!" : (result.iphoneError ?? "Failed to send iPhone push")
         }
     }
 
-    private func sendOverallTest() {
+    private func sendOverallTest(delay: TimeInterval?) {
         guard !isOverallTesting else { return }
         isOverallTesting = true
         overallTestStatus = nil
 
         Task {
-            let result = await notificationService.sendTestNotification(settings: settingsStore.settings)
+            let result: NotificationDispatchResult
+            if let delay {
+                result = await notificationService.sendTestNotificationWithDelay(seconds: delay, settings: settingsStore.settings)
+            } else {
+                result = await notificationService.sendTestNotification(settings: settingsStore.settings)
+            }
             isOverallTesting = false
             overallTestIsSuccess = result.isSuccess
-            overallTestStatus = result.summaryDescription
+            let delayNotice = delay != nil ? " (scheduled to fire in \(Int(delay!))s — you can switch windows/apps now!)" : ""
+            overallTestStatus = result.summaryDescription + delayNotice
             macPermissionStatus = await notificationService.checkMacAuthorizationStatus()
         }
     }

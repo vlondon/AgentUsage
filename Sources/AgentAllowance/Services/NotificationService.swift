@@ -39,14 +39,14 @@ struct NotificationDispatchResult: Equatable, Sendable {
         var parts: [String] = []
         if let macSuccess {
             if macSuccess {
-                parts.append("Mac: Sent")
+                parts.append("Mac: Scheduled/Sent")
             } else {
                 parts.append("Mac: \(macError ?? "Failed")")
             }
         }
         if let iphoneSuccess {
             if iphoneSuccess {
-                parts.append("iPhone: Sent")
+                parts.append("iPhone: Scheduled/Sent")
             } else {
                 parts.append("iPhone: \(iphoneError ?? "Failed")")
             }
@@ -73,8 +73,8 @@ final class NotificationCenterDelegate: NSObject, UNUserNotificationCenterDelega
 protocol NotificationSenderProtocol: Sendable {
     func requestMacAuthorization() async -> Bool
     func checkMacAuthorizationStatus() async -> UNAuthorizationStatus
-    func sendMacNotification(payload: NotificationPayload) async throws
-    func sendNtfyNotification(payload: NotificationPayload, topic: String, server: String) async throws
+    func sendMacNotification(payload: NotificationPayload, delaySeconds: TimeInterval?) async throws
+    func sendNtfyNotification(payload: NotificationPayload, topic: String, server: String, delaySeconds: TimeInterval?) async throws
 }
 
 struct LiveNotificationSender: NotificationSenderProtocol {
@@ -100,7 +100,7 @@ struct LiveNotificationSender: NotificationSenderProtocol {
         return settings.authorizationStatus
     }
 
-    func sendMacNotification(payload: NotificationPayload) async throws {
+    func sendMacNotification(payload: NotificationPayload, delaySeconds: TimeInterval? = nil) async throws {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
 
@@ -129,16 +129,28 @@ struct LiveNotificationSender: NotificationSenderProtocol {
         content.body = payload.body
         content.sound = .default
 
+        let trigger: UNNotificationTrigger?
+        if let delaySeconds, delaySeconds > 0 {
+            trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, delaySeconds), repeats: false)
+        } else {
+            trigger = nil
+        }
+
         let request = UNNotificationRequest(
             identifier: payload.identifier,
             content: content,
-            trigger: nil
+            trigger: trigger
         )
         try await center.add(request)
     }
 
-    func sendNtfyNotification(payload: NotificationPayload, topic: String, server: String) async throws {
-        let request = try NotificationService.makeNtfyRequest(payload: payload, topic: topic, server: server)
+    func sendNtfyNotification(payload: NotificationPayload, topic: String, server: String, delaySeconds: TimeInterval? = nil) async throws {
+        let request = try NotificationService.makeNtfyRequest(
+            payload: payload,
+            topic: topic,
+            server: server,
+            delaySeconds: delaySeconds
+        )
         let (_, response) = try await urlSession.data(for: request)
         if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
             throw NSError(
@@ -160,7 +172,8 @@ struct NotificationService: Sendable {
     static func makeNtfyRequest(
         payload: NotificationPayload,
         topic: String,
-        server: String
+        server: String,
+        delaySeconds: TimeInterval? = nil
     ) throws -> URLRequest {
         let trimmedTopic = topic.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTopic.isEmpty else {
@@ -202,13 +215,17 @@ struct NotificationService: Sendable {
         request.httpMethod = "POST"
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
 
-        let bodyDict: [String: Any] = [
+        var bodyDict: [String: Any] = [
             "topic": trimmedTopic,
             "title": payload.title,
             "message": payload.body,
             "priority": payload.priority,
             "tags": payload.tags
         ]
+
+        if let delaySeconds, delaySeconds > 0 {
+            bodyDict["delay"] = "\(Int(delaySeconds))s"
+        }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: bodyDict, options: [])
         return request
@@ -224,13 +241,14 @@ struct NotificationService: Sendable {
 
     func dispatch(
         payload: NotificationPayload,
+        delaySeconds: TimeInterval? = nil,
         settings: NotificationSettings
     ) async -> NotificationDispatchResult {
         var result = NotificationDispatchResult()
 
         if settings.macNotificationsEnabled {
             do {
-                try await sender.sendMacNotification(payload: payload)
+                try await sender.sendMacNotification(payload: payload, delaySeconds: delaySeconds)
                 result.macSuccess = true
             } catch {
                 result.macSuccess = false
@@ -251,7 +269,8 @@ struct NotificationService: Sendable {
                     try await sender.sendNtfyNotification(
                         payload: payload,
                         topic: topic,
-                        server: settings.cleanedNtfyServer
+                        server: settings.cleanedNtfyServer,
+                        delaySeconds: delaySeconds
                     )
                     result.iphoneSuccess = true
                 } catch {
@@ -274,29 +293,47 @@ struct NotificationService: Sendable {
         return await dispatch(payload: payload, settings: settings)
     }
 
-    func sendTestMacNotification() async -> NotificationDispatchResult {
+    func sendTestMacNotification(delaySeconds: TimeInterval? = nil) async -> NotificationDispatchResult {
         var testSettings = NotificationSettings()
         testSettings.macNotificationsEnabled = true
         testSettings.iphoneNotificationsEnabled = false
+        let title = delaySeconds != nil ? "Agent Allowance 10s Test" : "Agent Allowance Mac Alert"
+        let body = delaySeconds != nil
+            ? "Background 10-second notification received successfully!"
+            : "Mac notifications are working! You will receive local alerts when allowances reset."
         let payload = NotificationPayload(
-            title: "Agent Allowance Mac Alert",
-            body: "Mac notifications are working! You will receive local alerts when allowances reset.",
+            title: title,
+            body: body,
             priority: 3,
-            tags: ["sparkles", "bell"]
+            tags: ["hourglass", "bell"]
         )
-        return await dispatch(payload: payload, settings: testSettings)
+        return await dispatch(payload: payload, delaySeconds: delaySeconds, settings: testSettings)
     }
 
-    func sendTestIphoneNotification(settings: NotificationSettings) async -> NotificationDispatchResult {
+    func sendTestIphoneNotification(delaySeconds: TimeInterval? = nil, settings: NotificationSettings) async -> NotificationDispatchResult {
         var testSettings = settings
         testSettings.macNotificationsEnabled = false
         testSettings.iphoneNotificationsEnabled = true
+        let title = delaySeconds != nil ? "Agent Allowance 10s iPhone Test" : "Agent Allowance iPhone Alert"
+        let body = delaySeconds != nil
+            ? "Background 10-second iPhone push received via ntfy!"
+            : "iPhone notifications via ntfy are working! You will receive push alerts when allowances reset."
         let payload = NotificationPayload(
-            title: "Agent Allowance iPhone Alert",
-            body: "iPhone notifications via ntfy are working! You will receive push alerts when allowances reset.",
+            title: title,
+            body: body,
             priority: 3,
-            tags: ["sparkles", "bell"]
+            tags: ["hourglass", "bell"]
         )
-        return await dispatch(payload: payload, settings: testSettings)
+        return await dispatch(payload: payload, delaySeconds: delaySeconds, settings: testSettings)
+    }
+
+    func sendTestNotificationWithDelay(seconds: TimeInterval = 10, settings: NotificationSettings) async -> NotificationDispatchResult {
+        let payload = NotificationPayload(
+            title: "Agent Allowance (10s Delay)",
+            body: "10-second background notification received successfully!",
+            priority: 3,
+            tags: ["hourglass", "sparkles"]
+        )
+        return await dispatch(payload: payload, delaySeconds: seconds, settings: settings)
     }
 }
