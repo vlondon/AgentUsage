@@ -53,7 +53,7 @@ struct SettingsView: View {
 
             footer
         }
-        .frame(width: 500, height: 640)
+        .frame(width: 520, height: 680)
         .onAppear {
             refreshPermissionStatus()
         }
@@ -176,131 +176,224 @@ struct SettingsView: View {
     }
 
     private var iphoneSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             Toggle(isOn: $settingsStore.settings.iphoneNotificationsEnabled) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("iPhone Notifications (via ntfy)")
+                    Text("iPhone Notifications")
                         .font(.subheadline)
                         .fontWeight(.medium)
-                    Text("Receive push notifications on iPhone using the free, open-source ntfy app.")
+                    Text("Receive push notifications on iPhone via Pushover (reliable) or ntfy.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
-            }
-            .onChange(of: settingsStore.settings.iphoneNotificationsEnabled) { _, newValue in
-                if newValue && settingsStore.settings.trimmedNtfyTopic.isEmpty {
-                    settingsStore.settings.ntfyTopic = NotificationSettings.generateRandomTopic()
                 }
             }
 
             if settingsStore.settings.iphoneNotificationsEnabled {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("ntfy Topic")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.secondary)
-
-                    HStack(spacing: 6) {
-                        TextField("e.g. allowance-a1b2c3d4", text: $settingsStore.settings.ntfyTopic)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.callout)
-
-                        Button {
-                            settingsStore.settings.ntfyTopic = NotificationSettings.generateRandomTopic()
-                        } label: {
-                            Image(systemName: "dice")
-                        }
-                        .help("Generate a random private topic name")
-
-                        Button {
-                            copyTopicToClipboard()
-                        } label: {
-                            Image(systemName: isCopied ? "checkmark" : "doc.on.doc")
-                        }
-                        .help("Copy topic to clipboard")
-
-                        Button {
-                            sendIphoneTest(delay: nil)
-                        } label: {
-                            if isIphoneTesting {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .frame(width: 12, height: 12)
-                            } else {
-                                Text("Test iPhone")
-                            }
-                        }
-                        .controlSize(.small)
-                        .disabled(isIphoneTesting || settingsStore.settings.trimmedNtfyTopic.isEmpty || !settingsStore.settings.isTopicValid)
-
-                        Button {
-                            sendIphoneTest(delay: 10)
-                        } label: {
-                            Text("Test in 10s")
-                        }
-                        .controlSize(.small)
-                        .disabled(isIphoneTesting || settingsStore.settings.trimmedNtfyTopic.isEmpty || !settingsStore.settings.isTopicValid)
-                        .help("Sends an iPhone push scheduled to arrive in 10 seconds")
-                    }
-
-                    if let iphoneTestStatus {
-                        HStack(spacing: 5) {
-                            Image(systemName: iphoneTestIsSuccess ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                                .foregroundStyle(iphoneTestIsSuccess ? Color.green : Color.red)
-                            Text(iphoneTestStatus)
-                                .font(.caption2)
-                                .foregroundStyle(iphoneTestIsSuccess ? Color.primary : Color.red)
-                        }
-                    }
-
-                    if !settingsStore.settings.ntfyTopic.isEmpty && !settingsStore.settings.isTopicValid {
-                        Text("Topic may only contain letters, numbers, hyphens, and underscores.")
-                            .font(.caption2)
-                            .foregroundStyle(Color.red)
-                    }
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Setup steps:")
-                            .font(.caption2)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.secondary)
-                        Text("1. Install the free **ntfy** app on iOS from the App Store.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text("2. Open the ntfy app, tap **+**, and subscribe to topic: **\(settingsStore.settings.trimmedNtfyTopic.isEmpty ? "your-topic" : settingsStore.settings.trimmedNtfyTopic)**")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text("3. Make sure Notifications are allowed in iOS Settings -> ntfy.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-
-                        if !settingsStore.settings.trimmedNtfyTopic.isEmpty {
-                            Button("View Live Web Feed (\(settingsStore.settings.cleanedNtfyServer)/\(settingsStore.settings.trimmedNtfyTopic))") {
-                                if let url = URL(string: "\(settingsStore.settings.cleanedNtfyServer)/\(settingsStore.settings.trimmedNtfyTopic)") {
-                                    NSWorkspace.shared.open(url)
-                                }
-                            }
-                            .font(.caption2)
-                            .buttonStyle(.link)
-                            .padding(.top, 2)
-                        }
-                    }
-                    .padding(10)
-                    .background(Color.secondary.opacity(0.08))
-                    .cornerRadius(6)
-
-                    DisclosureGroup("Advanced: Custom Server") {
-                        TextField("https://ntfy.sh", text: $settingsStore.settings.ntfyServer)
-                            .textFieldStyle(.roundedBorder)
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("Push Service:")
                             .font(.caption)
-                            .padding(.top, 4)
+                            .foregroundStyle(.secondary)
+                        Picker("", selection: $settingsStore.settings.iphoneService) {
+                            Text("Pushover.net (Recommended)").tag(IPhonePushService.pushover)
+                            Text("ntfy.sh").tag(IPhonePushService.ntfy)
+                        }
+                        .pickerStyle(.segmented)
                     }
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 4)
+
+                    if settingsStore.settings.iphoneService == .pushover {
+                        pushoverControls
+                    } else {
+                        ntfyControls
+                    }
                 }
                 .padding(.leading, 24)
             }
+        }
+    }
+
+    private var pushoverControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Pushover User Key")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+                TextField("Your User Key (from pushover.net dashboard)", text: $settingsStore.settings.pushoverUserKey)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.callout)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Pushover Application / API Token")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+                TextField("Your App API Token (e.g. from Create an Application)", text: $settingsStore.settings.pushoverApiToken)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.callout)
+            }
+
+            HStack(spacing: 8) {
+                Spacer()
+
+                Button {
+                    sendIphoneTest(delay: nil)
+                } label: {
+                    if isIphoneTesting {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 12, height: 12)
+                    } else {
+                        Text("Test Pushover")
+                    }
+                }
+                .controlSize(.small)
+                .disabled(isIphoneTesting || !settingsStore.settings.isPushoverConfigured)
+
+                Button {
+                    sendIphoneTest(delay: 10)
+                } label: {
+                    Text("Test in 10s")
+                }
+                .controlSize(.small)
+                .disabled(isIphoneTesting || !settingsStore.settings.isPushoverConfigured)
+                .help("Sends a Pushover push scheduled to arrive in 10 seconds")
+            }
+
+            if let iphoneTestStatus {
+                HStack(spacing: 5) {
+                    Image(systemName: iphoneTestIsSuccess ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                        .foregroundStyle(iphoneTestIsSuccess ? Color.green : Color.red)
+                    Text(iphoneTestStatus)
+                        .font(.caption2)
+                        .foregroundStyle(iphoneTestIsSuccess ? Color.primary : Color.red)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Pushover Setup:")
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                Text("1. Install **Pushover** on iPhone from the App Store and log in.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("2. Copy your **User Key** from your [pushover.net](https://pushover.net) dashboard.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("3. Create an Application token on pushover.net (takes 10 seconds) and paste it above.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(10)
+            .background(Color.secondary.opacity(0.08))
+            .cornerRadius(6)
+        }
+    }
+
+    private var ntfyControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("ntfy Topic")
+                .font(.caption2)
+                .fontWeight(.medium)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 6) {
+                TextField("e.g. allowance-a1b2c3d4", text: $settingsStore.settings.ntfyTopic)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.callout)
+
+                Button {
+                    settingsStore.settings.ntfyTopic = NotificationSettings.generateRandomTopic()
+                } label: {
+                    Image(systemName: "dice")
+                }
+                .help("Generate a random private topic name")
+
+                Button {
+                    copyTopicToClipboard()
+                } label: {
+                    Image(systemName: isCopied ? "checkmark" : "doc.on.doc")
+                }
+                .help("Copy topic to clipboard")
+
+                Button {
+                    sendIphoneTest(delay: nil)
+                } label: {
+                    if isIphoneTesting {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 12, height: 12)
+                    } else {
+                        Text("Test ntfy")
+                    }
+                }
+                .controlSize(.small)
+                .disabled(isIphoneTesting || settingsStore.settings.trimmedNtfyTopic.isEmpty || !settingsStore.settings.isTopicValid)
+
+                Button {
+                    sendIphoneTest(delay: 10)
+                } label: {
+                    Text("Test in 10s")
+                }
+                .controlSize(.small)
+                .disabled(isIphoneTesting || settingsStore.settings.trimmedNtfyTopic.isEmpty || !settingsStore.settings.isTopicValid)
+                .help("Sends an iPhone push scheduled to arrive in 10 seconds")
+            }
+
+            if let iphoneTestStatus {
+                HStack(spacing: 5) {
+                    Image(systemName: iphoneTestIsSuccess ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                        .foregroundStyle(iphoneTestIsSuccess ? Color.green : Color.red)
+                    Text(iphoneTestStatus)
+                        .font(.caption2)
+                        .foregroundStyle(iphoneTestIsSuccess ? Color.primary : Color.red)
+                }
+            }
+
+            if !settingsStore.settings.ntfyTopic.isEmpty && !settingsStore.settings.isTopicValid {
+                Text("Topic may only contain letters, numbers, hyphens, and underscores.")
+                    .font(.caption2)
+                    .foregroundStyle(Color.red)
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("ntfy Setup:")
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                Text("1. Install the free **ntfy** app on iOS from the App Store.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("2. Open the ntfy app, tap **+**, and subscribe to topic: **\(settingsStore.settings.trimmedNtfyTopic.isEmpty ? "your-topic" : settingsStore.settings.trimmedNtfyTopic)**")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                if !settingsStore.settings.trimmedNtfyTopic.isEmpty {
+                    Button("View Live Web Feed (\(settingsStore.settings.cleanedNtfyServer)/\(settingsStore.settings.trimmedNtfyTopic))") {
+                        if let url = URL(string: "\(settingsStore.settings.cleanedNtfyServer)/\(settingsStore.settings.trimmedNtfyTopic)") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    .font(.caption2)
+                    .buttonStyle(.link)
+                    .padding(.top, 2)
+                }
+            }
+            .padding(10)
+            .background(Color.secondary.opacity(0.08))
+            .cornerRadius(6)
+
+            DisclosureGroup("Advanced: Custom Server") {
+                TextField("https://ntfy.sh", text: $settingsStore.settings.ntfyServer)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.caption)
+                    .padding(.top, 4)
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .padding(.top, 4)
         }
     }
 
@@ -451,7 +544,7 @@ struct SettingsView: View {
             isIphoneTesting = false
             iphoneTestIsSuccess = result.iphoneSuccess == true
             let suffix = delay != nil ? " (will deliver in \(Int(delay!))s)" : ""
-            iphoneTestStatus = result.iphoneSuccess == true ? "iPhone test push sent to ntfy\(suffix)!" : (result.iphoneError ?? "Failed to send iPhone push")
+            iphoneTestStatus = result.iphoneSuccess == true ? "\(settingsStore.settings.iphoneService.rawValue) test push sent\(suffix)!" : (result.iphoneError ?? "Failed to send iPhone push")
         }
     }
 

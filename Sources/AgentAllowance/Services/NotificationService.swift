@@ -76,6 +76,7 @@ protocol NotificationSenderProtocol: Sendable {
     func checkMacAuthorizationStatus() async -> UNAuthorizationStatus
     func sendMacNotification(payload: NotificationPayload, delaySeconds: TimeInterval?) async throws
     func sendNtfyNotification(payload: NotificationPayload, topic: String, server: String, delaySeconds: TimeInterval?) async throws
+    func sendPushoverNotification(payload: NotificationPayload, userKey: String, apiToken: String, delaySeconds: TimeInterval?) async throws
 }
 
 struct LiveNotificationSender: NotificationSenderProtocol {
@@ -175,6 +176,38 @@ struct LiveNotificationSender: NotificationSenderProtocol {
             )
         }
     }
+
+    func sendPushoverNotification(payload: NotificationPayload, userKey: String, apiToken: String, delaySeconds: TimeInterval? = nil) async throws {
+        let sendWork = {
+            let request = try NotificationService.makePushoverRequest(
+                payload: payload,
+                userKey: userKey,
+                apiToken: apiToken
+            )
+            let (data, response) = try await self.urlSession.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+                var errorMessage = "Pushover server returned HTTP \(httpResponse.statusCode)"
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let errors = json["errors"] as? [String], !errors.isEmpty {
+                    errorMessage = errors.joined(separator: ", ")
+                }
+                throw NSError(
+                    domain: "PushoverError",
+                    code: httpResponse.statusCode,
+                    userInfo: [NSLocalizedDescriptionKey: errorMessage]
+                )
+            }
+        }
+
+        if let delaySeconds, delaySeconds > 0 {
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
+                try? await sendWork()
+            }
+        } else {
+            try await sendWork()
+        }
+    }
 }
 
 struct NotificationService: Sendable {
@@ -242,6 +275,54 @@ struct NotificationService: Sendable {
         return request
     }
 
+    static func makePushoverRequest(
+        payload: NotificationPayload,
+        userKey: String,
+        apiToken: String
+    ) throws -> URLRequest {
+        let cleanUser = userKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanToken = apiToken.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !cleanUser.isEmpty else {
+            throw NSError(
+                domain: "PushoverError",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Pushover User Key cannot be empty"]
+            )
+        }
+
+        guard !cleanToken.isEmpty else {
+            throw NSError(
+                domain: "PushoverError",
+                code: -2,
+                userInfo: [NSLocalizedDescriptionKey: "Pushover API Token cannot be empty"]
+            )
+        }
+
+        guard let url = URL(string: "https://api.pushover.net/1/messages.json") else {
+            throw NSError(
+                domain: "PushoverError",
+                code: -3,
+                userInfo: [NSLocalizedDescriptionKey: "Invalid Pushover URL"]
+            )
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+
+        let bodyDict: [String: Any] = [
+            "token": cleanToken,
+            "user": cleanUser,
+            "title": payload.title,
+            "message": payload.body,
+            "priority": 1
+        ]
+
+        request.httpBody = try JSONSerialization.data(withJSONObject: bodyDict, options: [])
+        return request
+    }
+
     func requestMacAuthorization() async -> Bool {
         await sender.requestMacAuthorization()
     }
@@ -268,25 +349,46 @@ struct NotificationService: Sendable {
         }
 
         if settings.iphoneNotificationsEnabled {
-            let topic = settings.trimmedNtfyTopic
-            if topic.isEmpty {
-                result.iphoneSuccess = false
-                result.iphoneError = "ntfy topic is not set"
-            } else if !settings.isTopicValid {
-                result.iphoneSuccess = false
-                result.iphoneError = "ntfy topic has invalid characters"
-            } else {
-                do {
-                    try await sender.sendNtfyNotification(
-                        payload: payload,
-                        topic: topic,
-                        server: settings.cleanedNtfyServer,
-                        delaySeconds: delaySeconds
-                    )
-                    result.iphoneSuccess = true
-                } catch {
+            switch settings.iphoneService {
+            case .pushover:
+                if !settings.isPushoverConfigured {
                     result.iphoneSuccess = false
-                    result.iphoneError = error.localizedDescription
+                    result.iphoneError = "Pushover User Key or API Token is missing"
+                } else {
+                    do {
+                        try await sender.sendPushoverNotification(
+                            payload: payload,
+                            userKey: settings.trimmedPushoverUserKey,
+                            apiToken: settings.trimmedPushoverApiToken,
+                            delaySeconds: delaySeconds
+                        )
+                        result.iphoneSuccess = true
+                    } catch {
+                        result.iphoneSuccess = false
+                        result.iphoneError = error.localizedDescription
+                    }
+                }
+            case .ntfy:
+                let topic = settings.trimmedNtfyTopic
+                if topic.isEmpty {
+                    result.iphoneSuccess = false
+                    result.iphoneError = "ntfy topic is not set"
+                } else if !settings.isTopicValid {
+                    result.iphoneSuccess = false
+                    result.iphoneError = "ntfy topic has invalid characters"
+                } else {
+                    do {
+                        try await sender.sendNtfyNotification(
+                            payload: payload,
+                            topic: topic,
+                            server: settings.cleanedNtfyServer,
+                            delaySeconds: delaySeconds
+                        )
+                        result.iphoneSuccess = true
+                    } catch {
+                        result.iphoneSuccess = false
+                        result.iphoneError = error.localizedDescription
+                    }
                 }
             }
         }
@@ -327,8 +429,8 @@ struct NotificationService: Sendable {
         testSettings.iphoneNotificationsEnabled = true
         let title = delaySeconds != nil ? "Agent Allowance 10s iPhone Test" : "Agent Allowance iPhone Alert"
         let body = delaySeconds != nil
-            ? "Background 10-second iPhone push received via ntfy!"
-            : "iPhone notifications via ntfy are working! You will receive push alerts when allowances reset."
+            ? "Background 10-second iPhone push received via \(settings.iphoneService.rawValue)!"
+            : "iPhone notifications via \(settings.iphoneService.rawValue) are working! You will receive push alerts when allowances reset."
         let payload = NotificationPayload(
             title: title,
             body: body,

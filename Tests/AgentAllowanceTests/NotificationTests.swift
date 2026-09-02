@@ -11,6 +11,9 @@ final class MockNotificationSender: NotificationSenderProtocol, @unchecked Senda
     var macError: (any Error)?
     var ntfyError: (any Error)?
 
+    var sentPushoverRequests: [(payload: NotificationPayload, userKey: String, apiToken: String, delay: TimeInterval?)] = []
+    var pushoverError: (any Error)?
+
     func requestMacAuthorization() async -> Bool {
         authResult
     }
@@ -34,6 +37,11 @@ final class MockNotificationSender: NotificationSenderProtocol, @unchecked Senda
     func sendNtfyNotification(payload: NotificationPayload, topic: String, server: String, delaySeconds: TimeInterval? = nil) async throws {
         if let ntfyError { throw ntfyError }
         sentNtfyRequests.append((payload, topic, server, delaySeconds))
+    }
+
+    func sendPushoverNotification(payload: NotificationPayload, userKey: String, apiToken: String, delaySeconds: TimeInterval? = nil) async throws {
+        if let pushoverError { throw pushoverError }
+        sentPushoverRequests.append((payload, userKey, apiToken, delaySeconds))
     }
 }
 
@@ -178,6 +186,7 @@ final class NotificationTests: XCTestCase {
         let settings = NotificationSettings(
             macNotificationsEnabled: true,
             iphoneNotificationsEnabled: true,
+            iphoneService: .ntfy,
             ntfyTopic: "agent-test-topic"
         )
 
@@ -190,6 +199,67 @@ final class NotificationTests: XCTestCase {
         XCTAssertEqual(mock.sentMacPayloads.count, 1)
         XCTAssertEqual(mock.sentNtfyRequests.count, 1)
         XCTAssertEqual(mock.sentNtfyRequests.first?.topic, "agent-test-topic")
+    }
+
+    func testMakePushoverRequestValid() throws {
+        let payload = NotificationPayload(
+            title: "Claude Allowance Reset",
+            body: "Your 5-hour session pool has fully refreshed."
+        )
+
+        let request = try NotificationService.makePushoverRequest(
+            payload: payload,
+            userKey: "user-12345",
+            apiToken: "app-token-67890"
+        )
+
+        XCTAssertEqual(request.url?.absoluteString, "https://api.pushover.net/1/messages.json")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json; charset=utf-8")
+
+        let bodyData = try XCTUnwrap(request.httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
+
+        XCTAssertEqual(json["user"] as? String, "user-12345")
+        XCTAssertEqual(json["token"] as? String, "app-token-67890")
+        XCTAssertEqual(json["title"] as? String, "Claude Allowance Reset")
+        XCTAssertEqual(json["message"] as? String, "Your 5-hour session pool has fully refreshed.")
+    }
+
+    func testPushoverDispatchRequiresKeys() async {
+        let mock = MockNotificationSender()
+        let service = NotificationService(sender: mock)
+        let settings = NotificationSettings(
+            iphoneNotificationsEnabled: true,
+            iphoneService: .pushover,
+            pushoverUserKey: "",
+            pushoverApiToken: ""
+        )
+
+        let payload = NotificationPayload(title: "Test", body: "Msg")
+        let result = await service.dispatch(payload: payload, settings: settings)
+
+        XCTAssertEqual(result.iphoneSuccess, false)
+        XCTAssertTrue(result.iphoneError?.contains("missing") ?? false)
+    }
+
+    func testPushoverDispatchSuccess() async {
+        let mock = MockNotificationSender()
+        let service = NotificationService(sender: mock)
+        let settings = NotificationSettings(
+            iphoneNotificationsEnabled: true,
+            iphoneService: .pushover,
+            pushoverUserKey: "user-abc",
+            pushoverApiToken: "token-xyz"
+        )
+
+        let payload = NotificationPayload(title: "Test", body: "Msg")
+        let result = await service.dispatch(payload: payload, settings: settings)
+
+        XCTAssertEqual(result.iphoneSuccess, true)
+        XCTAssertEqual(mock.sentPushoverRequests.count, 1)
+        XCTAssertEqual(mock.sentPushoverRequests.first?.userKey, "user-abc")
+        XCTAssertEqual(mock.sentPushoverRequests.first?.apiToken, "token-xyz")
     }
 
     // MARK: - AllowanceNotificationMonitor Tests
@@ -470,6 +540,7 @@ final class NotificationTests: XCTestCase {
         let settings = NotificationSettings(
             macNotificationsEnabled: true,
             iphoneNotificationsEnabled: true,
+            iphoneService: .ntfy,
             ntfyTopic: "delayed-topic"
         )
 

@@ -1,9 +1,19 @@
 import Foundation
 import Observation
 
+enum IPhonePushService: String, Codable, CaseIterable, Identifiable, Sendable {
+    case pushover = "Pushover"
+    case ntfy = "ntfy"
+
+    var id: String { rawValue }
+}
+
 struct NotificationSettings: Codable, Equatable, Sendable {
     var macNotificationsEnabled: Bool
     var iphoneNotificationsEnabled: Bool
+    var iphoneService: IPhonePushService
+    var pushoverUserKey: String
+    var pushoverApiToken: String
     var ntfyTopic: String
     var ntfyServer: String
     var notifyOnReset: Bool
@@ -16,6 +26,9 @@ struct NotificationSettings: Codable, Equatable, Sendable {
     init(
         macNotificationsEnabled: Bool = false,
         iphoneNotificationsEnabled: Bool = false,
+        iphoneService: IPhonePushService = .pushover,
+        pushoverUserKey: String = "",
+        pushoverApiToken: String = "",
         ntfyTopic: String = "",
         ntfyServer: String = "https://ntfy.sh",
         notifyOnReset: Bool = true,
@@ -25,6 +38,9 @@ struct NotificationSettings: Codable, Equatable, Sendable {
     ) {
         self.macNotificationsEnabled = macNotificationsEnabled
         self.iphoneNotificationsEnabled = iphoneNotificationsEnabled
+        self.iphoneService = iphoneService
+        self.pushoverUserKey = pushoverUserKey
+        self.pushoverApiToken = pushoverApiToken
         self.ntfyTopic = ntfyTopic
         self.ntfyServer = ntfyServer
         self.notifyOnReset = notifyOnReset
@@ -36,6 +52,9 @@ struct NotificationSettings: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case macNotificationsEnabled
         case iphoneNotificationsEnabled
+        case iphoneService
+        case pushoverUserKey
+        case pushoverApiToken
         case ntfyTopic
         case ntfyServer
         case notifyOnReset
@@ -48,6 +67,9 @@ struct NotificationSettings: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.macNotificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .macNotificationsEnabled) ?? false
         self.iphoneNotificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .iphoneNotificationsEnabled) ?? false
+        self.iphoneService = try container.decodeIfPresent(IPhonePushService.self, forKey: .iphoneService) ?? .pushover
+        self.pushoverUserKey = try container.decodeIfPresent(String.self, forKey: .pushoverUserKey) ?? ""
+        self.pushoverApiToken = try container.decodeIfPresent(String.self, forKey: .pushoverApiToken) ?? ""
         self.ntfyTopic = try container.decodeIfPresent(String.self, forKey: .ntfyTopic) ?? ""
         self.ntfyServer = try container.decodeIfPresent(String.self, forKey: .ntfyServer) ?? "https://ntfy.sh"
         self.notifyOnReset = try container.decodeIfPresent(Bool.self, forKey: .notifyOnReset) ?? true
@@ -58,6 +80,18 @@ struct NotificationSettings: Codable, Equatable, Sendable {
 
     var isAnyNotificationEnabled: Bool {
         macNotificationsEnabled || iphoneNotificationsEnabled
+    }
+
+    var trimmedPushoverUserKey: String {
+        pushoverUserKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedPushoverApiToken: String {
+        pushoverApiToken.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var isPushoverConfigured: Bool {
+        !trimmedPushoverUserKey.isEmpty && !trimmedPushoverApiToken.isEmpty
     }
 
     var trimmedNtfyTopic: String {

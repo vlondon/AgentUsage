@@ -91,16 +91,24 @@ Tap the menu-bar gauge to refresh data that is more than a minute old, or use th
 
 Agent Allowance supports notifications when your session or weekly allowances refresh:
 
-- **macOS Notifications:** Local native notifications via Apple's `UserNotifications` framework.
-- **iPhone Notifications:** Direct push notifications to your iPhone via [ntfy.sh](https://ntfy.sh) (free, open-source, no account required).
+- **macOS Notifications:** Local alerts with native system banners and sounds.
+- **iPhone Notifications:** Direct push notifications to your iPhone via **Pushover** (instant & reliable) or **ntfy** (free & open-source).
+
+### iPhone Setup with Pushover (Recommended)
+
+1. Install **Pushover** on your iPhone from the App Store.
+2. Open Settings in Agent Allowance (gear icon in footer) and enable **iPhone Notifications** -> **Pushover.net**.
+3. Enter your **User Key** from your [pushover.net](https://pushover.net) dashboard.
+4. Create an Application API Token on pushover.net (takes 10 seconds) and enter it in Agent Allowance.
+5. Tap **Test Pushover** to confirm delivery to your iPhone!
 
 ### iPhone Setup with ntfy
 
 1. Install the free **ntfy** app on iOS from the App Store.
-2. Open Settings in Agent Allowance (gear icon in footer) and enable **iPhone Notifications**.
+2. Open Settings in Agent Allowance and choose **ntfy.sh**.
 3. Use the auto-generated private topic name or enter a custom one (e.g. `allowance-a1b2c3d4`).
 4. In the ntfy app on your iPhone, subscribe to that same topic name.
-5. Tap **Send Test Notification** in Settings to confirm delivery!
+5. Tap **Test ntfy** in Settings to confirm delivery!
 
 Notification triggers can be configured in Settings for:
 - Allowance resets (when a 5-hour session or weekly pool refreshes)
