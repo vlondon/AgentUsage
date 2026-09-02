@@ -3,6 +3,7 @@ import Observation
 
 enum IPhonePushService: String, Codable, CaseIterable, Identifiable, Sendable {
     case pushover = "Pushover"
+    case simplepush = "Simplepush"
     case ntfy = "ntfy"
 
     var id: String { rawValue }
@@ -14,6 +15,7 @@ struct NotificationSettings: Codable, Equatable, Sendable {
     var iphoneService: IPhonePushService
     var pushoverUserKey: String
     var pushoverApiToken: String
+    var simplepushKey: String
     var ntfyTopic: String
     var ntfyServer: String
     var notifyOnReset: Bool
@@ -29,6 +31,7 @@ struct NotificationSettings: Codable, Equatable, Sendable {
         iphoneService: IPhonePushService = .pushover,
         pushoverUserKey: String = "",
         pushoverApiToken: String = "",
+        simplepushKey: String = "",
         ntfyTopic: String = "",
         ntfyServer: String = "https://ntfy.sh",
         notifyOnReset: Bool = true,
@@ -41,6 +44,7 @@ struct NotificationSettings: Codable, Equatable, Sendable {
         self.iphoneService = iphoneService
         self.pushoverUserKey = pushoverUserKey
         self.pushoverApiToken = pushoverApiToken
+        self.simplepushKey = simplepushKey
         self.ntfyTopic = ntfyTopic
         self.ntfyServer = ntfyServer
         self.notifyOnReset = notifyOnReset
@@ -55,6 +59,7 @@ struct NotificationSettings: Codable, Equatable, Sendable {
         case iphoneService
         case pushoverUserKey
         case pushoverApiToken
+        case simplepushKey
         case ntfyTopic
         case ntfyServer
         case notifyOnReset
@@ -70,6 +75,7 @@ struct NotificationSettings: Codable, Equatable, Sendable {
         self.iphoneService = try container.decodeIfPresent(IPhonePushService.self, forKey: .iphoneService) ?? .pushover
         self.pushoverUserKey = try container.decodeIfPresent(String.self, forKey: .pushoverUserKey) ?? ""
         self.pushoverApiToken = try container.decodeIfPresent(String.self, forKey: .pushoverApiToken) ?? ""
+        self.simplepushKey = try container.decodeIfPresent(String.self, forKey: .simplepushKey) ?? ""
         self.ntfyTopic = try container.decodeIfPresent(String.self, forKey: .ntfyTopic) ?? ""
         self.ntfyServer = try container.decodeIfPresent(String.self, forKey: .ntfyServer) ?? "https://ntfy.sh"
         self.notifyOnReset = try container.decodeIfPresent(Bool.self, forKey: .notifyOnReset) ?? true
@@ -92,6 +98,14 @@ struct NotificationSettings: Codable, Equatable, Sendable {
 
     var isPushoverConfigured: Bool {
         !trimmedPushoverUserKey.isEmpty && !trimmedPushoverApiToken.isEmpty
+    }
+
+    var trimmedSimplepushKey: String {
+        simplepushKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var isSimplepushConfigured: Bool {
+        !trimmedSimplepushKey.isEmpty
     }
 
     var trimmedNtfyTopic: String {

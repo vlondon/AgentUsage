@@ -77,6 +77,7 @@ protocol NotificationSenderProtocol: Sendable {
     func sendMacNotification(payload: NotificationPayload, delaySeconds: TimeInterval?) async throws
     func sendNtfyNotification(payload: NotificationPayload, topic: String, server: String, delaySeconds: TimeInterval?) async throws
     func sendPushoverNotification(payload: NotificationPayload, userKey: String, apiToken: String, delaySeconds: TimeInterval?) async throws
+    func sendSimplepushNotification(payload: NotificationPayload, key: String, delaySeconds: TimeInterval?) async throws
 }
 
 struct LiveNotificationSender: NotificationSenderProtocol {
@@ -208,6 +209,40 @@ struct LiveNotificationSender: NotificationSenderProtocol {
             try await sendWork()
         }
     }
+
+    func sendSimplepushNotification(payload: NotificationPayload, key: String, delaySeconds: TimeInterval? = nil) async throws {
+        let sendWork = {
+            let request = try NotificationService.makeSimplepushRequest(
+                payload: payload,
+                key: key
+            )
+            let (data, response) = try await self.urlSession.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+                throw NSError(
+                    domain: "SimplepushError",
+                    code: httpResponse.statusCode,
+                    userInfo: [NSLocalizedDescriptionKey: "Simplepush server returned HTTP \(httpResponse.statusCode)"]
+                )
+            }
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let status = json["status"] as? String, status != "OK" {
+                throw NSError(
+                    domain: "SimplepushError",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Simplepush returned status: \(status)"]
+                )
+            }
+        }
+
+        if let delaySeconds, delaySeconds > 0 {
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
+                try? await sendWork()
+            }
+        } else {
+            try await sendWork()
+        }
+    }
 }
 
 struct NotificationService: Sendable {
@@ -295,7 +330,7 @@ struct NotificationService: Sendable {
             throw NSError(
                 domain: "PushoverError",
                 code: -2,
-                userInfo: [NSLocalizedDescriptionKey: "Pushover API Token cannot be empty"]
+                userInfo: [NSLocalizedDescriptionKey: "Pushover API Token cannot be empty. Create one in 10s at pushover.net/apps/build"]
             )
         }
 
@@ -317,6 +352,42 @@ struct NotificationService: Sendable {
             "title": payload.title,
             "message": payload.body,
             "priority": 1
+        ]
+
+        request.httpBody = try JSONSerialization.data(withJSONObject: bodyDict, options: [])
+        return request
+    }
+
+    static func makeSimplepushRequest(
+        payload: NotificationPayload,
+        key: String
+    ) throws -> URLRequest {
+        let cleanKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !cleanKey.isEmpty else {
+            throw NSError(
+                domain: "SimplepushError",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Simplepush key cannot be empty"]
+            )
+        }
+
+        guard let url = URL(string: "https://api.simplepush.io/send") else {
+            throw NSError(
+                domain: "SimplepushError",
+                code: -2,
+                userInfo: [NSLocalizedDescriptionKey: "Invalid Simplepush URL"]
+            )
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+
+        let bodyDict: [String: Any] = [
+            "key": cleanKey,
+            "title": payload.title,
+            "msg": payload.body
         ]
 
         request.httpBody = try JSONSerialization.data(withJSONObject: bodyDict, options: [])
@@ -353,13 +424,34 @@ struct NotificationService: Sendable {
             case .pushover:
                 if !settings.isPushoverConfigured {
                     result.iphoneSuccess = false
-                    result.iphoneError = "Pushover User Key or API Token is missing"
+                    if settings.trimmedPushoverUserKey.isEmpty {
+                        result.iphoneError = "Pushover User Key is missing"
+                    } else {
+                        result.iphoneError = "Pushover API Token is missing (create on pushover.net/apps/build)"
+                    }
                 } else {
                     do {
                         try await sender.sendPushoverNotification(
                             payload: payload,
                             userKey: settings.trimmedPushoverUserKey,
                             apiToken: settings.trimmedPushoverApiToken,
+                            delaySeconds: delaySeconds
+                        )
+                        result.iphoneSuccess = true
+                    } catch {
+                        result.iphoneSuccess = false
+                        result.iphoneError = error.localizedDescription
+                    }
+                }
+            case .simplepush:
+                if !settings.isSimplepushConfigured {
+                    result.iphoneSuccess = false
+                    result.iphoneError = "Simplepush Key is missing"
+                } else {
+                    do {
+                        try await sender.sendSimplepushNotification(
+                            payload: payload,
+                            key: settings.trimmedSimplepushKey,
                             delaySeconds: delaySeconds
                         )
                         result.iphoneSuccess = true

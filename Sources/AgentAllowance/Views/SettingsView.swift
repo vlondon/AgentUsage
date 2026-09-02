@@ -53,7 +53,7 @@ struct SettingsView: View {
 
             footer
         }
-        .frame(width: 520, height: 680)
+        .frame(width: 530, height: 700)
         .onAppear {
             refreshPermissionStatus()
         }
@@ -182,7 +182,7 @@ struct SettingsView: View {
                     Text("iPhone Notifications")
                         .font(.subheadline)
                         .fontWeight(.medium)
-                    Text("Receive push notifications on iPhone via Pushover (reliable) or ntfy.")
+                    Text("Receive push notifications on iPhone via Pushover, Simplepush (Key only), or ntfy.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -195,15 +195,19 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Picker("", selection: $settingsStore.settings.iphoneService) {
-                            Text("Pushover.net (Recommended)").tag(IPhonePushService.pushover)
+                            Text("Pushover.net").tag(IPhonePushService.pushover)
+                            Text("Simplepush (Key only)").tag(IPhonePushService.simplepush)
                             Text("ntfy.sh").tag(IPhonePushService.ntfy)
                         }
                         .pickerStyle(.segmented)
                     }
 
-                    if settingsStore.settings.iphoneService == .pushover {
+                    switch settingsStore.settings.iphoneService {
+                    case .pushover:
                         pushoverControls
-                    } else {
+                    case .simplepush:
+                        simplepushControls
+                    case .ntfy:
                         ntfyControls
                     }
                 }
@@ -225,11 +229,21 @@ struct SettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Pushover Application / API Token")
+                HStack {
+                    Text("Pushover Application / API Token")
+                        .font(.caption2)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Create App Token on pushover.net (10s)") {
+                        if let url = URL(string: "https://pushover.net/apps/build") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
                     .font(.caption2)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.secondary)
-                TextField("Your App API Token (e.g. from Create an Application)", text: $settingsStore.settings.pushoverApiToken)
+                    .buttonStyle(.link)
+                }
+                TextField("Application Token (create in 1 click at pushover.net/apps/build)", text: $settingsStore.settings.pushoverApiToken)
                     .textFieldStyle(.roundedBorder)
                     .font(.callout)
             }
@@ -272,17 +286,81 @@ struct SettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Pushover Setup:")
+                Text("Pushover Setup (Why two keys?):")
                     .font(.caption2)
                     .fontWeight(.semibold)
                     .foregroundStyle(.secondary)
-                Text("1. Install **Pushover** on iPhone from the App Store and log in.")
+                Text("• Pushover requires a **User Key** (who receives it) and an **App Token** (what app sends it).\n• If you already have your User Key, click the link above to generate an App Token in 10 seconds (Name: 'Agent Allowance').\n• Alternatively, switch to **Simplepush** above to use a single key with no app token!")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                Text("2. Copy your **User Key** from your [pushover.net](https://pushover.net) dashboard.")
+            }
+            .padding(10)
+            .background(Color.secondary.opacity(0.08))
+            .cornerRadius(6)
+        }
+    }
+
+    private var simplepushControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Simplepush Key (Single Key — No App Token)")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+                TextField("e.g. abc123xyz", text: $settingsStore.settings.simplepushKey)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.callout)
+            }
+
+            HStack(spacing: 8) {
+                Spacer()
+
+                Button {
+                    sendIphoneTest(delay: nil)
+                } label: {
+                    if isIphoneTesting {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 12, height: 12)
+                    } else {
+                        Text("Test Simplepush")
+                    }
+                }
+                .controlSize(.small)
+                .disabled(isIphoneTesting || !settingsStore.settings.isSimplepushConfigured)
+
+                Button {
+                    sendIphoneTest(delay: 10)
+                } label: {
+                    Text("Test in 10s")
+                }
+                .controlSize(.small)
+                .disabled(isIphoneTesting || !settingsStore.settings.isSimplepushConfigured)
+                .help("Sends a Simplepush notification scheduled to arrive in 10 seconds")
+            }
+
+            if let iphoneTestStatus {
+                HStack(spacing: 5) {
+                    Image(systemName: iphoneTestIsSuccess ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                        .foregroundStyle(iphoneTestIsSuccess ? Color.green : Color.red)
+                    Text(iphoneTestStatus)
+                        .font(.caption2)
+                        .foregroundStyle(iphoneTestIsSuccess ? Color.primary : Color.red)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Simplepush Setup:")
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                Text("1. Install the free **Simplepush** app on iPhone from App Store.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                Text("3. Create an Application token on pushover.net (takes 10 seconds) and paste it above.")
+                Text("2. Open the Simplepush app on iPhone — it shows your Key immediately.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("3. Paste that Key above — no registration, passwords, or API tokens needed!")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

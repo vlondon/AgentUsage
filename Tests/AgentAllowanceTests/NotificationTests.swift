@@ -14,6 +14,9 @@ final class MockNotificationSender: NotificationSenderProtocol, @unchecked Senda
     var sentPushoverRequests: [(payload: NotificationPayload, userKey: String, apiToken: String, delay: TimeInterval?)] = []
     var pushoverError: (any Error)?
 
+    var sentSimplepushRequests: [(payload: NotificationPayload, key: String, delay: TimeInterval?)] = []
+    var simplepushError: (any Error)?
+
     func requestMacAuthorization() async -> Bool {
         authResult
     }
@@ -42,6 +45,11 @@ final class MockNotificationSender: NotificationSenderProtocol, @unchecked Senda
     func sendPushoverNotification(payload: NotificationPayload, userKey: String, apiToken: String, delaySeconds: TimeInterval? = nil) async throws {
         if let pushoverError { throw pushoverError }
         sentPushoverRequests.append((payload, userKey, apiToken, delaySeconds))
+    }
+
+    func sendSimplepushNotification(payload: NotificationPayload, key: String, delaySeconds: TimeInterval? = nil) async throws {
+        if let simplepushError { throw simplepushError }
+        sentSimplepushRequests.append((payload, key, delaySeconds))
     }
 }
 
@@ -260,6 +268,62 @@ final class NotificationTests: XCTestCase {
         XCTAssertEqual(mock.sentPushoverRequests.count, 1)
         XCTAssertEqual(mock.sentPushoverRequests.first?.userKey, "user-abc")
         XCTAssertEqual(mock.sentPushoverRequests.first?.apiToken, "token-xyz")
+    }
+
+    func testMakeSimplepushRequestValid() throws {
+        let payload = NotificationPayload(
+            title: "Claude Allowance Reset",
+            body: "Your 5-hour session pool has fully refreshed."
+        )
+
+        let request = try NotificationService.makeSimplepushRequest(
+            payload: payload,
+            key: "key123"
+        )
+
+        XCTAssertEqual(request.url?.absoluteString, "https://api.simplepush.io/send")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json; charset=utf-8")
+
+        let bodyData = try XCTUnwrap(request.httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
+
+        XCTAssertEqual(json["key"] as? String, "key123")
+        XCTAssertEqual(json["title"] as? String, "Claude Allowance Reset")
+        XCTAssertEqual(json["msg"] as? String, "Your 5-hour session pool has fully refreshed.")
+    }
+
+    func testSimplepushDispatchRequiresKey() async {
+        let mock = MockNotificationSender()
+        let service = NotificationService(sender: mock)
+        let settings = NotificationSettings(
+            iphoneNotificationsEnabled: true,
+            iphoneService: .simplepush,
+            simplepushKey: ""
+        )
+
+        let payload = NotificationPayload(title: "Test", body: "Msg")
+        let result = await service.dispatch(payload: payload, settings: settings)
+
+        XCTAssertEqual(result.iphoneSuccess, false)
+        XCTAssertTrue(result.iphoneError?.contains("missing") ?? false)
+    }
+
+    func testSimplepushDispatchSuccess() async {
+        let mock = MockNotificationSender()
+        let service = NotificationService(sender: mock)
+        let settings = NotificationSettings(
+            iphoneNotificationsEnabled: true,
+            iphoneService: .simplepush,
+            simplepushKey: "mykey123"
+        )
+
+        let payload = NotificationPayload(title: "Test", body: "Msg")
+        let result = await service.dispatch(payload: payload, settings: settings)
+
+        XCTAssertEqual(result.iphoneSuccess, true)
+        XCTAssertEqual(mock.sentSimplepushRequests.count, 1)
+        XCTAssertEqual(mock.sentSimplepushRequests.first?.key, "mykey123")
     }
 
     // MARK: - AllowanceNotificationMonitor Tests
