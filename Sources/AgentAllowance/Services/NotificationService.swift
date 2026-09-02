@@ -117,6 +117,12 @@ struct LiveNotificationSender: NotificationSenderProtocol {
             content.body = payload.body
             content.sound = .default
 
+            if let iconUrl = Bundle.main.url(forResource: "simple-gauge", withExtension: "png") ??
+                             Bundle.main.url(forResource: "push-icon", withExtension: "png"),
+               let attachment = try? UNNotificationAttachment(identifier: "icon", url: iconUrl, options: nil) {
+                content.attachments = [attachment]
+            }
+
             let trigger: UNNotificationTrigger?
             if let delaySeconds, delaySeconds > 0 {
                 trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, delaySeconds), repeats: false)
