@@ -35,6 +35,10 @@ struct WindowSnapshot: Equatable, Sendable {
 }
 
 final class AllowanceNotificationMonitor: @unchecked Sendable {
+    static let exhaustionThreshold: Double = 5.0
+    static let minRefillPercent: Double = 50.0
+    static let minPercentJump: Double = 30.0
+
     private let lock = NSLock()
     private var snapshots: [String: WindowSnapshot] = [:]
 
@@ -64,7 +68,7 @@ final class AllowanceNotificationMonitor: @unchecked Sendable {
                 guard let previous = snapshots[key] else {
                     // First time encountering this window (cold baseline):
                     let initialPercent = window.remainingPercent ?? 100
-                    let isExhausted = initialPercent <= 5 || Int(initialPercent.rounded()) == 0
+                    let isExhausted = initialPercent <= Self.exhaustionThreshold
                     let snapshot = WindowSnapshot(
                         provider: usage.provider,
                         windowId: window.id,
@@ -83,17 +87,19 @@ final class AllowanceNotificationMonitor: @unchecked Sendable {
                 var currentSnapshot = previous
 
                 if let currPercent = window.remainingPercent {
-                    // If allowance reached 0% or near-empty (<= 5% or rounded 0%), mark as exhausted
-                    if currPercent <= 5 || Int(currPercent.rounded()) == 0 {
+                    // If allowance reached 0% or near-empty (<= exhaustionThreshold), mark as exhausted
+                    if currPercent <= Self.exhaustionThreshold {
                         currentSnapshot.wasExhausted = true
                         currentSnapshot.notifiedResetThisCycle = false
                     }
 
                     // Check for reset notification:
-                    // Fire if this window was exhausted (<= 5% / 0% left) and has now replenished
+                    // Fire if this window was exhausted and has now replenished
                     if settings.notifyOnReset && settings.isAnyNotificationEnabled && !currentSnapshot.notifiedResetThisCycle && currentSnapshot.wasExhausted {
                         let prevPercent = previous.remainingPercent ?? 0
-                        if currPercent > 5 && (currPercent >= 50 || currPercent - prevPercent >= 30) {
+                        let isRefilled = currPercent > Self.exhaustionThreshold && (currPercent >= Self.minRefillPercent || currPercent - prevPercent >= Self.minPercentJump)
+
+                        if isRefilled {
                             let scopeSuffix = window.scope.map { " (\($0))" } ?? ""
                             let rounded = Int(currPercent.rounded())
                             let title = "\(usage.provider.rawValue) Allowance Reset"
