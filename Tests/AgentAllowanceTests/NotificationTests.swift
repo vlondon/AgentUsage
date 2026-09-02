@@ -141,7 +141,7 @@ final class NotificationTests: XCTestCase {
             server: "https://ntfy.sh"
         )
 
-        XCTAssertEqual(request.url?.absoluteString, "https://ntfy.sh/my-topic")
+        XCTAssertEqual(request.url?.absoluteString, "https://ntfy.sh")
         XCTAssertEqual(request.httpMethod, "POST")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json; charset=utf-8")
 

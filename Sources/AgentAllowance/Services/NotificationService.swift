@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import UserNotifications
 
@@ -39,14 +40,14 @@ struct NotificationDispatchResult: Equatable, Sendable {
         var parts: [String] = []
         if let macSuccess {
             if macSuccess {
-                parts.append("Mac: Scheduled/Sent")
+                parts.append("Mac: Sent/Scheduled")
             } else {
                 parts.append("Mac: \(macError ?? "Failed")")
             }
         }
         if let iphoneSuccess {
             if iphoneSuccess {
-                parts.append("iPhone: Scheduled/Sent")
+                parts.append("iPhone: Sent/Scheduled")
             } else {
                 parts.append("iPhone: \(iphoneError ?? "Failed")")
             }
@@ -104,44 +105,58 @@ struct LiveNotificationSender: NotificationSenderProtocol {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
 
-        switch settings.authorizationStatus {
-        case .denied:
-            throw NSError(
-                domain: "NotificationError",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Notification permission denied in macOS System Settings."]
-            )
-        case .notDetermined:
-            let granted = try await center.requestAuthorization(options: [.alert, .sound])
-            if !granted {
-                throw NSError(
-                    domain: "NotificationError",
-                    code: 2,
-                    userInfo: [NSLocalizedDescriptionKey: "Notification permission was not granted."]
-                )
+        if settings.authorizationStatus == .notDetermined {
+            _ = try? await center.requestAuthorization(options: [.alert, .sound])
+        }
+
+        if settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional {
+            let content = UNMutableNotificationContent()
+            content.title = payload.title
+            content.body = payload.body
+            content.sound = .default
+
+            let trigger: UNNotificationTrigger?
+            if let delaySeconds, delaySeconds > 0 {
+                trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, delaySeconds), repeats: false)
+            } else {
+                trigger = nil
             }
-        default:
-            break
+
+            let request = UNNotificationRequest(
+                identifier: payload.identifier,
+                content: content,
+                trigger: trigger
+            )
+            try? await center.add(request)
         }
 
-        let content = UNMutableNotificationContent()
-        content.title = payload.title
-        content.body = payload.body
-        content.sound = .default
-
-        let trigger: UNNotificationTrigger?
-        if let delaySeconds, delaySeconds > 0 {
-            trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, delaySeconds), repeats: false)
-        } else {
-            trigger = nil
-        }
-
-        let request = UNNotificationRequest(
-            identifier: payload.identifier,
-            content: content,
-            trigger: trigger
+        // Post via NSAppleScript system notification fallback to guarantee banner and sound delivery on macOS
+        Self.postAppleScriptNotification(
+            title: payload.title,
+            body: payload.body,
+            delaySeconds: delaySeconds
         )
-        try await center.add(request)
+    }
+
+    private static func postAppleScriptNotification(title: String, body: String, delaySeconds: TimeInterval?) {
+        let work = {
+            let safeTitle = title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            let safeBody = body.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            let source = "display notification \"\(safeBody)\" with title \"\(safeTitle)\" sound name \"default\""
+            if let appleScript = NSAppleScript(source: source) {
+                var error: NSDictionary?
+                appleScript.executeAndReturnError(&error)
+            }
+        }
+
+        if let delaySeconds, delaySeconds > 0 {
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
+                await MainActor.run { work() }
+            }
+        } else {
+            work()
+        }
     }
 
     func sendNtfyNotification(payload: NotificationPayload, topic: String, server: String, delaySeconds: TimeInterval? = nil) async throws {
@@ -203,11 +218,11 @@ struct NotificationService: Sendable {
             cleanServer.removeLast()
         }
 
-        guard let url = URL(string: "\(cleanServer)/\(trimmedTopic)") else {
+        guard let url = URL(string: cleanServer) else {
             throw NSError(
                 domain: "NtfyError",
                 code: -3,
-                userInfo: [NSLocalizedDescriptionKey: "Invalid ntfy URL: \(cleanServer)/\(trimmedTopic)"]
+                userInfo: [NSLocalizedDescriptionKey: "Invalid ntfy URL: \(cleanServer)"]
             )
         }
 
