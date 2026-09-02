@@ -7,6 +7,7 @@ struct WindowSnapshot: Equatable, Sendable {
     let scope: String?
     var remainingPercent: Double?
     var resetAt: Date?
+    var wasExhausted: Bool
     var notifiedResetThisCycle: Bool
     var notifiedLowThisCycle: Bool
 
@@ -17,6 +18,7 @@ struct WindowSnapshot: Equatable, Sendable {
         scope: String?,
         remainingPercent: Double?,
         resetAt: Date?,
+        wasExhausted: Bool = false,
         notifiedResetThisCycle: Bool = false,
         notifiedLowThisCycle: Bool = false
     ) {
@@ -26,6 +28,7 @@ struct WindowSnapshot: Equatable, Sendable {
         self.scope = scope
         self.remainingPercent = remainingPercent
         self.resetAt = resetAt
+        self.wasExhausted = wasExhausted
         self.notifiedResetThisCycle = notifiedResetThisCycle
         self.notifiedLowThisCycle = notifiedLowThisCycle
     }
@@ -60,8 +63,8 @@ final class AllowanceNotificationMonitor: @unchecked Sendable {
 
                 guard let previous = snapshots[key] else {
                     // First time encountering this window (cold baseline):
-                    // Record state without generating alert noise.
                     let initialPercent = window.remainingPercent ?? 100
+                    let isExhausted = initialPercent <= 0
                     let snapshot = WindowSnapshot(
                         provider: usage.provider,
                         windowId: window.id,
@@ -69,7 +72,8 @@ final class AllowanceNotificationMonitor: @unchecked Sendable {
                         scope: window.scope,
                         remainingPercent: window.remainingPercent,
                         resetAt: window.resetAt,
-                        notifiedResetThisCycle: initialPercent >= 80,
+                        wasExhausted: isExhausted,
+                        notifiedResetThisCycle: !isExhausted,
                         notifiedLowThisCycle: initialPercent <= threshold
                     )
                     snapshots[key] = snapshot
@@ -79,17 +83,15 @@ final class AllowanceNotificationMonitor: @unchecked Sendable {
                 var currentSnapshot = previous
 
                 if let currPercent = window.remainingPercent {
-                    // Re-arm reset notification if allowance was consumed or if a new cycle started
-                    if currPercent <= 75 {
-                        currentSnapshot.notifiedResetThisCycle = false
-                    } else if let prevResetAt = previous.resetAt,
-                              let currResetAt = window.resetAt,
-                              currResetAt > prevResetAt.addingTimeInterval(1800) {
+                    // If allowance reached 0%, mark it as exhausted and re-arm for reset notification
+                    if currPercent <= 0 {
+                        currentSnapshot.wasExhausted = true
                         currentSnapshot.notifiedResetThisCycle = false
                     }
 
-                    // Check for reset notification
-                    if settings.notifyOnReset && settings.isAnyNotificationEnabled && !currentSnapshot.notifiedResetThisCycle {
+                    // Check for reset notification:
+                    // ONLY fire if this window had 0% left (wasExhausted) and has now reset (> 0%)
+                    if settings.notifyOnReset && settings.isAnyNotificationEnabled && !currentSnapshot.notifiedResetThisCycle && currentSnapshot.wasExhausted {
                         let isReset = isResetConditionMet(
                             previous: previous,
                             currentPercent: currPercent,
@@ -109,10 +111,11 @@ final class AllowanceNotificationMonitor: @unchecked Sendable {
                                     title: title,
                                     body: body,
                                     identifier: identifier,
-                                    priority: 3,
+                                    priority: 4,
                                     tags: ["sparkles", "repeat"]
                                 )
                             )
+                            currentSnapshot.wasExhausted = false
                             currentSnapshot.notifiedResetThisCycle = true
                         }
                     }
@@ -138,7 +141,7 @@ final class AllowanceNotificationMonitor: @unchecked Sendable {
                             )
                             currentSnapshot.notifiedLowThisCycle = true
                         }
-                    } else {
+                    } else if currPercent > threshold {
                         // Re-arm low allowance notification once allowance recovers above threshold
                         currentSnapshot.notifiedLowThisCycle = false
                     }
@@ -160,23 +163,8 @@ final class AllowanceNotificationMonitor: @unchecked Sendable {
         currentResetAt: Date?,
         now: Date
     ) -> Bool {
-        let prevPercent = previous.remainingPercent ?? 0
-
-        // Case 1: Substantial percent jump (e.g. from <=75% back up to >=80%, or increase of >=30% reaching >=70%)
-        if (prevPercent <= 75 && currentPercent >= 80) || (currentPercent - prevPercent >= 30 && currentPercent >= 70) {
-            return true
-        }
-
-        // Case 2: Past reset timestamp and allowance replenished to healthy level
-        if let prevResetAt = previous.resetAt, now >= prevResetAt, currentPercent >= 80 && currentPercent > prevPercent {
-            return true
-        }
-
-        // Case 3: Reset window moved forward into a new cycle (at least 30 min later) with healthy allowance
-        if let prevResetAt = previous.resetAt,
-           let currentResetAt,
-           currentResetAt > prevResetAt.addingTimeInterval(1800),
-           currentPercent >= 70 {
+        // Since wasExhausted is true (was at 0%), any replenishment to > 0% is a reset
+        if currentPercent > 0 {
             return true
         }
 

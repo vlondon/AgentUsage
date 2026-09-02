@@ -352,7 +352,7 @@ final class NotificationTests: XCTestCase {
         XCTAssertEqual(monitor.snapshotCount(), 2)
     }
 
-    func testMonitorDetectsResetFromLowToFull() {
+    func testMonitorDetectsResetFromZeroToFull() {
         let monitor = AllowanceNotificationMonitor()
         let settings = NotificationSettings(
             macNotificationsEnabled: true,
@@ -363,12 +363,12 @@ final class NotificationTests: XCTestCase {
         let initialResetAt = now.addingTimeInterval(3600)
         let nextResetAt = now.addingTimeInterval(5 * 3600)
 
-        // Baseline: 20% remaining
+        // Baseline: 0% remaining (exhausted)
         let initialUsage = [
             ProviderUsage(
                 provider: .claude,
                 windows: [
-                    AllowanceWindow(id: "session", label: "5h session", remainingPercent: 20, resetAt: initialResetAt)
+                    AllowanceWindow(id: "session", label: "5h session", remainingPercent: 0, resetAt: initialResetAt)
                 ],
                 isLoading: false
             )
@@ -397,7 +397,7 @@ final class NotificationTests: XCTestCase {
         XCTAssertTrue(duplicatePayloads.isEmpty)
     }
 
-    func testMonitorExpiredWindowWithTinyBumpDoesNotNotifyReset() {
+    func testMonitorUnexhaustedAllowanceRollOverDoesNotNotifyReset() {
         let monitor = AllowanceNotificationMonitor()
         let settings = NotificationSettings(
             macNotificationsEnabled: true,
@@ -407,33 +407,20 @@ final class NotificationTests: XCTestCase {
         let now = Date()
         let pastResetAt = now.addingTimeInterval(-60) // Expired 1 minute ago
 
-        // Baseline: 10% remaining
+        // Baseline: 20% remaining (never dropped to 0%)
         let initialUsage = [
             ProviderUsage(
                 provider: .claude,
                 windows: [
-                    AllowanceWindow(id: "session", label: "5h session", remainingPercent: 10, resetAt: pastResetAt)
+                    AllowanceWindow(id: "session", label: "5h session", remainingPercent: 20, resetAt: pastResetAt)
                 ],
                 isLoading: false
             )
         ]
         _ = monitor.evaluate(usages: initialUsage, settings: settings, now: now)
 
-        // Tiny bump after expired reset time (e.g. 10% -> 12%) without real replenishment: must NOT alert
-        let bumpUsage = [
-            ProviderUsage(
-                provider: .claude,
-                windows: [
-                    AllowanceWindow(id: "session", label: "5h session", remainingPercent: 12, resetAt: pastResetAt)
-                ],
-                isLoading: false
-            )
-        ]
-        let bumpPayloads = monitor.evaluate(usages: bumpUsage, settings: settings, now: now.addingTimeInterval(10))
-        XCTAssertTrue(bumpPayloads.isEmpty, "Tiny bump on expired window should not fire reset notification")
-
-        // Full replenishment (12% -> 100%): must alert
-        let fullRefillUsage = [
+        // Window rolls over to new cycle at 100%: should NOT alert because user never ran out of allowance (was not 0%)
+        let rolloverUsage = [
             ProviderUsage(
                 provider: .claude,
                 windows: [
@@ -442,7 +429,32 @@ final class NotificationTests: XCTestCase {
                 isLoading: false
             )
         ]
-        let refillPayloads = monitor.evaluate(usages: fullRefillUsage, settings: settings, now: now.addingTimeInterval(20))
+        let payloads = monitor.evaluate(usages: rolloverUsage, settings: settings, now: now.addingTimeInterval(10))
+        XCTAssertTrue(payloads.isEmpty, "Unexhausted allowance rollover must not fire reset notification")
+
+        // Now allowance drops to 0%
+        let zeroUsage = [
+            ProviderUsage(
+                provider: .claude,
+                windows: [
+                    AllowanceWindow(id: "session", label: "5h session", remainingPercent: 0, resetAt: now.addingTimeInterval(4 * 3600))
+                ],
+                isLoading: false
+            )
+        ]
+        _ = monitor.evaluate(usages: zeroUsage, settings: settings, now: now.addingTimeInterval(3600))
+
+        // And then resets back to 100%: MUST alert now!
+        let fullRefillUsage = [
+            ProviderUsage(
+                provider: .claude,
+                windows: [
+                    AllowanceWindow(id: "session", label: "5h session", remainingPercent: 100, resetAt: now.addingTimeInterval(9 * 3600))
+                ],
+                isLoading: false
+            )
+        ]
+        let refillPayloads = monitor.evaluate(usages: fullRefillUsage, settings: settings, now: now.addingTimeInterval(4 * 3600 + 1))
         XCTAssertEqual(refillPayloads.count, 1)
         XCTAssertEqual(refillPayloads[0].title, "Claude Allowance Reset")
     }
@@ -458,7 +470,7 @@ final class NotificationTests: XCTestCase {
             ProviderUsage(
                 provider: .cursor,
                 windows: [
-                    AllowanceWindow(id: "cycle", label: "Billing cycle", remainingPercent: 15, resetAt: nil)
+                    AllowanceWindow(id: "cycle", label: "Billing cycle", remainingPercent: 0, resetAt: nil)
                 ],
                 isLoading: false
             )
@@ -532,7 +544,7 @@ final class NotificationTests: XCTestCase {
             ProviderUsage(
                 provider: .antigravity,
                 windows: [
-                    AllowanceWindow(id: "gemini-5h", label: "5h session", scope: "Gemini", remainingPercent: 15, resetAt: initialResetAt)
+                    AllowanceWindow(id: "gemini-5h", label: "5h session", scope: "Gemini", remainingPercent: 0, resetAt: initialResetAt)
                 ],
                 isLoading: false
             )
