@@ -169,9 +169,10 @@ struct SettingsView: View {
 
     private func openNotificationSettings() {
         if let modernUrl = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
-            NSWorkspace.shared.open(modernUrl)
-        } else if let fallbackUrl = URL(string: "x-apple.systempreferences:com.apple.preference.notifications") {
-            NSWorkspace.shared.open(fallbackUrl)
+            let opened = NSWorkspace.shared.open(modernUrl)
+            if !opened, let fallbackUrl = URL(string: "x-apple.systempreferences:com.apple.preference.notifications") {
+                NSWorkspace.shared.open(fallbackUrl)
+            }
         }
     }
 
