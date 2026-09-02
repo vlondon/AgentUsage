@@ -273,4 +273,30 @@ struct NotificationService: Sendable {
         )
         return await dispatch(payload: payload, settings: settings)
     }
+
+    func sendTestMacNotification() async -> NotificationDispatchResult {
+        var testSettings = NotificationSettings()
+        testSettings.macNotificationsEnabled = true
+        testSettings.iphoneNotificationsEnabled = false
+        let payload = NotificationPayload(
+            title: "Agent Allowance Mac Alert",
+            body: "Mac notifications are working! You will receive local alerts when allowances reset.",
+            priority: 3,
+            tags: ["sparkles", "bell"]
+        )
+        return await dispatch(payload: payload, settings: testSettings)
+    }
+
+    func sendTestIphoneNotification(settings: NotificationSettings) async -> NotificationDispatchResult {
+        var testSettings = settings
+        testSettings.macNotificationsEnabled = false
+        testSettings.iphoneNotificationsEnabled = true
+        let payload = NotificationPayload(
+            title: "Agent Allowance iPhone Alert",
+            body: "iPhone notifications via ntfy are working! You will receive push alerts when allowances reset.",
+            priority: 3,
+            tags: ["sparkles", "bell"]
+        )
+        return await dispatch(payload: payload, settings: testSettings)
+    }
 }

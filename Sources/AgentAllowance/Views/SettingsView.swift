@@ -6,9 +6,18 @@ struct SettingsView: View {
     @Bindable var settingsStore: SettingsStore
     let notificationService: NotificationService
 
-    @State private var testStatus: String?
-    @State private var isTesting = false
-    @State private var testIsSuccess = false
+    @State private var overallTestStatus: String?
+    @State private var isOverallTesting = false
+    @State private var overallTestIsSuccess = false
+
+    @State private var macTestStatus: String?
+    @State private var isMacTesting = false
+    @State private var macTestIsSuccess = false
+
+    @State private var iphoneTestStatus: String?
+    @State private var isIphoneTesting = false
+    @State private var iphoneTestIsSuccess = false
+
     @State private var macPermissionStatus: UNAuthorizationStatus = .notDetermined
     @Environment(\.dismiss) private var dismiss
 
@@ -43,7 +52,7 @@ struct SettingsView: View {
 
             footer
         }
-        .frame(width: 460, height: 560)
+        .frame(width: 460, height: 580)
         .onAppear {
             refreshPermissionStatus()
         }
@@ -90,29 +99,57 @@ struct SettingsView: View {
             }
 
             if settingsStore.settings.macNotificationsEnabled {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(macPermissionStatus == .authorized ? Color.green : Color.orange)
-                        .frame(width: 7, height: 7)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(macPermissionStatus == .authorized ? Color.green : Color.orange)
+                            .frame(width: 7, height: 7)
 
-                    if macPermissionStatus == .authorized {
-                        Text("Permission granted")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    } else if macPermissionStatus == .denied {
-                        Text("Permission denied in System Settings")
-                            .font(.caption2)
-                            .foregroundStyle(Color.red)
+                        if macPermissionStatus == .authorized {
+                            Text("Permission granted")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        } else if macPermissionStatus == .denied {
+                            Text("Permission denied in System Settings")
+                                .font(.caption2)
+                                .foregroundStyle(Color.red)
 
-                        Button("Open System Settings") {
-                            openNotificationSettings()
+                            Button("Open System Settings") {
+                                openNotificationSettings()
+                            }
+                            .font(.caption2)
+                            .buttonStyle(.link)
+                        } else {
+                            Text("Permission not determined")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
-                        .font(.caption2)
-                        .buttonStyle(.link)
-                    } else {
-                        Text("Permission not determined")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        Button {
+                            sendMacTest()
+                        } label: {
+                            if isMacTesting {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .frame(width: 12, height: 12)
+                            } else {
+                                Text("Test Mac Alert")
+                            }
+                        }
+                        .controlSize(.small)
+                        .disabled(isMacTesting)
+                    }
+
+                    if let macTestStatus {
+                        HStack(spacing: 5) {
+                            Image(systemName: macTestIsSuccess ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                                .foregroundStyle(macTestIsSuccess ? Color.green : Color.red)
+                            Text(macTestStatus)
+                                .font(.caption2)
+                                .foregroundStyle(macTestIsSuccess ? Color.primary : Color.red)
+                        }
                     }
                 }
                 .padding(.leading, 24)
@@ -147,7 +184,7 @@ struct SettingsView: View {
             }
 
             if settingsStore.settings.iphoneNotificationsEnabled {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text("ntfy Topic")
                         .font(.caption)
                         .fontWeight(.medium)
@@ -164,6 +201,30 @@ struct SettingsView: View {
                             Image(systemName: "dice")
                         }
                         .help("Generate a random private topic name")
+
+                        Button {
+                            sendIphoneTest()
+                        } label: {
+                            if isIphoneTesting {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .frame(width: 12, height: 12)
+                            } else {
+                                Text("Test iPhone")
+                            }
+                        }
+                        .controlSize(.small)
+                        .disabled(isIphoneTesting || settingsStore.settings.trimmedNtfyTopic.isEmpty || !settingsStore.settings.isTopicValid)
+                    }
+
+                    if let iphoneTestStatus {
+                        HStack(spacing: 5) {
+                            Image(systemName: iphoneTestIsSuccess ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                                .foregroundStyle(iphoneTestIsSuccess ? Color.green : Color.red)
+                            Text(iphoneTestStatus)
+                                .font(.caption2)
+                                .foregroundStyle(iphoneTestIsSuccess ? Color.primary : Color.red)
+                        }
                     }
 
                     if !settingsStore.settings.ntfyTopic.isEmpty && !settingsStore.settings.isTopicValid {
@@ -251,29 +312,30 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Button {
-                    sendTest()
+                    sendOverallTest()
                 } label: {
-                    if isTesting {
+                    if isOverallTesting {
                         ProgressView()
                             .controlSize(.small)
                             .frame(width: 14, height: 14)
                     } else {
                         Image(systemName: "paperplane")
                     }
-                    Text("Send Test Notification")
+                    Text("Send Test Notification (All Enabled)")
                 }
-                .disabled(isTesting || !settingsStore.settings.isAnyNotificationEnabled)
+                .buttonStyle(.borderedProminent)
+                .disabled(isOverallTesting || !settingsStore.settings.isAnyNotificationEnabled)
 
                 Spacer()
             }
 
-            if let testStatus {
+            if let overallTestStatus {
                 HStack(spacing: 6) {
-                    Image(systemName: testIsSuccess ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                        .foregroundStyle(testIsSuccess ? Color.green : Color.red)
-                    Text(testStatus)
+                    Image(systemName: overallTestIsSuccess ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                        .foregroundStyle(overallTestIsSuccess ? Color.green : Color.red)
+                    Text(overallTestStatus)
                         .font(.caption)
-                        .foregroundStyle(testIsSuccess ? Color.primary : Color.red)
+                        .foregroundStyle(overallTestIsSuccess ? Color.primary : Color.red)
                 }
             } else if !settingsStore.settings.isAnyNotificationEnabled {
                 Text("Enable Mac or iPhone notifications above to test.")
@@ -296,16 +358,43 @@ struct SettingsView: View {
         .padding(.vertical, 12)
     }
 
-    private func sendTest() {
-        guard !isTesting else { return }
-        isTesting = true
-        testStatus = nil
+    private func sendMacTest() {
+        guard !isMacTesting else { return }
+        isMacTesting = true
+        macTestStatus = nil
+
+        Task {
+            let result = await notificationService.sendTestMacNotification()
+            isMacTesting = false
+            macTestIsSuccess = result.macSuccess == true
+            macTestStatus = result.macSuccess == true ? "Mac notification sent successfully!" : (result.macError ?? "Failed to send Mac alert")
+            macPermissionStatus = await notificationService.checkMacAuthorizationStatus()
+        }
+    }
+
+    private func sendIphoneTest() {
+        guard !isIphoneTesting else { return }
+        isIphoneTesting = true
+        iphoneTestStatus = nil
+
+        Task {
+            let result = await notificationService.sendTestIphoneNotification(settings: settingsStore.settings)
+            isIphoneTesting = false
+            iphoneTestIsSuccess = result.iphoneSuccess == true
+            iphoneTestStatus = result.iphoneSuccess == true ? "iPhone test push sent to ntfy!" : (result.iphoneError ?? "Failed to send iPhone push")
+        }
+    }
+
+    private func sendOverallTest() {
+        guard !isOverallTesting else { return }
+        isOverallTesting = true
+        overallTestStatus = nil
 
         Task {
             let result = await notificationService.sendTestNotification(settings: settingsStore.settings)
-            isTesting = false
-            testIsSuccess = result.isSuccess
-            testStatus = result.summaryDescription
+            isOverallTesting = false
+            overallTestIsSuccess = result.isSuccess
+            overallTestStatus = result.summaryDescription
             macPermissionStatus = await notificationService.checkMacAuthorizationStatus()
         }
     }
