@@ -107,19 +107,22 @@ struct LiveNotificationSender: NotificationSenderProtocol {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
 
-        if settings.authorizationStatus == .notDetermined {
-            _ = try? await center.requestAuthorization(options: [.alert, .sound])
+        var status = settings.authorizationStatus
+        if status == .notDetermined {
+            let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+            if granted {
+                status = .authorized
+            }
         }
 
-        if settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional {
+        var unSuccess = false
+        if status == .authorized || status == .provisional {
             let content = UNMutableNotificationContent()
             content.title = payload.title
             content.body = payload.body
             content.sound = .default
 
-            if let iconUrl = Bundle.main.url(forResource: "simple-gauge", withExtension: "png") ??
-                             Bundle.main.url(forResource: "push-icon", withExtension: "png"),
-               let attachment = try? UNNotificationAttachment(identifier: "icon", url: iconUrl, options: nil) {
+            if let attachment = Self.createIconAttachment() {
                 content.attachments = [attachment]
             }
 
@@ -135,15 +138,38 @@ struct LiveNotificationSender: NotificationSenderProtocol {
                 content: content,
                 trigger: trigger
             )
-            try? await center.add(request)
+            do {
+                try await center.add(request)
+                unSuccess = true
+            } catch {
+                unSuccess = false
+            }
         }
 
-        // Post via NSAppleScript system notification fallback to guarantee banner and sound delivery on macOS
-        Self.postAppleScriptNotification(
-            title: payload.title,
-            body: payload.body,
-            delaySeconds: delaySeconds
-        )
+        // Fallback to system notification only if UNUserNotificationCenter is not available/authorized
+        if !unSuccess {
+            Self.postAppleScriptNotification(
+                title: payload.title,
+                body: payload.body,
+                delaySeconds: delaySeconds
+            )
+        }
+    }
+
+    private static func createIconAttachment() -> UNNotificationAttachment? {
+        guard let sourceUrl = Bundle.main.url(forResource: "simple-gauge", withExtension: "png") ??
+                             Bundle.main.url(forResource: "push-icon", withExtension: "png") else {
+            return nil
+        }
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let targetUrl = tempDir.appendingPathComponent("icon.png")
+        do {
+            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: sourceUrl, to: targetUrl)
+            return try UNNotificationAttachment(identifier: "icon", url: targetUrl, options: nil)
+        } catch {
+            return nil
+        }
     }
 
     private static func postAppleScriptNotification(title: String, body: String, delaySeconds: TimeInterval?) {
