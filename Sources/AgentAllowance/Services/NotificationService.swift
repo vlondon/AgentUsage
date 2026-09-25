@@ -118,10 +118,6 @@ struct LiveNotificationSender: NotificationSenderProtocol {
             content.body = payload.body
             content.sound = .default
 
-            if let attachment = Self.createIconAttachment() {
-                content.attachments = [attachment]
-            }
-
             let trigger: UNNotificationTrigger?
             if let delaySeconds, delaySeconds > 0 {
                 trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, delaySeconds), repeats: false)
@@ -148,27 +144,6 @@ struct LiveNotificationSender: NotificationSenderProtocol {
                 try await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
             }
             try await Self.postAppleScriptNotification(title: payload.title, body: payload.body)
-        }
-    }
-
-    private static let iconAttachmentDirectory = FileManager.default.temporaryDirectory
-        .appendingPathComponent("AgentAllowanceNotificationIcons", isDirectory: true)
-
-    private static func createIconAttachment() -> UNNotificationAttachment? {
-        guard let sourceUrl = Bundle.main.url(forResource: "simple-gauge", withExtension: "png") ??
-                             Bundle.main.url(forResource: "push-icon", withExtension: "png") else {
-            return nil
-        }
-        // The notification store moves the file out when the request is added, so each
-        // attachment gets its own file name inside one reused directory.
-        let targetUrl = iconAttachmentDirectory.appendingPathComponent("\(UUID().uuidString).png")
-        do {
-            try FileManager.default.createDirectory(at: iconAttachmentDirectory, withIntermediateDirectories: true)
-            try FileManager.default.copyItem(at: sourceUrl, to: targetUrl)
-            return try UNNotificationAttachment(identifier: "icon", url: targetUrl, options: nil)
-        } catch {
-            try? FileManager.default.removeItem(at: targetUrl)
-            return nil
         }
     }
 
