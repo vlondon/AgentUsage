@@ -131,8 +131,8 @@ Agent Allowance can alert you when an allowance that ran out resets, or when one
 
 ### Triggers
 
-- **Reset:** when a 5-hour session, weekly pool or billing cycle that ran out (5% or less remaining) refills. A window that resets before running out does not alert.
-- **Low allowance:** when an allowance drops to or below a threshold you choose: 5%, 10%, 15% or 20%.
+- **Reset:** when any allowance window (session, daily, weekly or billing cycle) that ran out (5% or less remaining) refills to at least 50%, or rises by 30 points or more. A window that resets before running out does not alert. On by default.
+- **Low allowance:** when an allowance drops to or below a threshold you choose: 5%, 10%, 15% or 20%. Off until you turn it on.
 
 While any channel is on, the app checks in the background every 2, 5, 10 or 15 minutes (set in Settings), so alerts arrive without opening the popover. An alert that fails to send is retried on the next checks, up to three attempts, and only on the channels that missed it.
 
@@ -143,13 +143,13 @@ Each channel has a test button and a **Test in 10s** button, so you can switch a
 1. Install **Pushover** on your iPhone and sign in.
 2. In Settings, turn on **iPhone Notifications** and choose **Pushover.net**.
 3. Enter the **User Key** from your [pushover.net](https://pushover.net) dashboard.
-4. Pushover also needs an application token for the app sending the alerts. Use **Create App Token on pushover.net** in Settings, create an application, and paste its **API Token**.
+4. Pushover also needs an application token for the app sending the alerts. Use **Create App Token on pushover.net (10s)** in Settings, create an application, and paste its **API Token**.
 5. Click **Test Pushover**.
 
 ### iPhone setup with Simplepush
 
 1. Install **Simplepush** on your iPhone. The app shows your key when it opens.
-2. In Settings, turn on **iPhone Notifications** and choose **Simplepush**.
+2. In Settings, turn on **iPhone Notifications** and choose **Simplepush (Key only)**.
 3. Paste the key. Simplepush needs no account or app token.
 4. Click **Test Simplepush**.
 

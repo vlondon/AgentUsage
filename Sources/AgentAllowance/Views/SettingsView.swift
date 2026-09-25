@@ -501,7 +501,7 @@ struct SettingsView: View {
                 .font(.subheadline)
                 .fontWeight(.medium)
 
-            Toggle("Notify when exhausted allowance resets (from 0%)", isOn: $settingsStore.settings.notifyOnReset)
+            Toggle("Notify when an exhausted allowance resets", isOn: $settingsStore.settings.notifyOnReset)
                 .font(.callout)
 
             Toggle("Notify when allowance is low (<= \(settingsStore.settings.lowAllowanceThreshold)%)", isOn: $settingsStore.settings.notifyOnLowAllowance)
