@@ -75,7 +75,26 @@ it visible.
 open build/AgentAllowance.app
 ```
 
-The packaged app is written to `build/AgentAllowance.app`. It is ad-hoc signed and has `LSUIElement` enabled, so it appears only in the menu bar and not in the Dock.
+The packaged app is written to `build/AgentAllowance.app`. It has `LSUIElement` enabled, so it appears only in the menu bar and not in the Dock.
+
+### Code signing and Keychain prompts
+
+Pushover and Simplepush keys are stored in the Keychain, and macOS remembers "Always Allow" for a specific app signature. `package_app.sh` signs with the first of these it finds:
+
+1. `SIGN_IDENTITY`, if you set it (a certificate name or SHA-1 hash).
+2. A valid Apple Development certificate in your keychain. Any Apple ID signed in to Xcode can create one: Xcode → Settings → Accounts → Manage Certificates → + → Apple Development.
+3. A self-signed certificate named "Agent Allowance Local Signing".
+4. Ad-hoc signing.
+
+Options 1–3 give the same signature on every rebuild, so you allow Keychain access once. An ad-hoc signature changes with every build, so macOS asks again after each rebuild.
+
+Without an Apple ID in Xcode, create the self-signed certificate once:
+
+```sh
+./scripts/create_signing_identity.sh
+```
+
+It creates the certificate in your login keychain; nothing is sent anywhere. To remove it, delete "Agent Allowance Local Signing" in Keychain Access.
 
 ## Reading the display
 

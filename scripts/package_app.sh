@@ -50,5 +50,35 @@ if [[ -f "$ICON_SOURCE" ]]; then
     fi
 fi
 
-codesign --force --deep --sign - "$APP_DIR"
+# Sign with a stable identity when one is available, so macOS keeps "Always Allow" for
+# the app's Keychain items across rebuilds; an ad-hoc signature changes with every build.
+# Order: SIGN_IDENTITY, a valid Apple Development certificate, the self-signed identity
+# from scripts/create_signing_identity.sh, then ad-hoc.
+LOCAL_IDENTITY="Agent Allowance Local Signing"
+SIGN_IDENTITY=${SIGN_IDENTITY:-}
+SIGN_LABEL=$SIGN_IDENTITY
+if [[ -z "$SIGN_IDENTITY" ]]; then
+    VALID_IDENTITIES=$(security find-identity -v -p codesigning 2> /dev/null || true)
+    ALL_IDENTITIES=$(security find-identity -p codesigning 2> /dev/null || true)
+    if MATCH=$(print -r -- "$VALID_IDENTITIES" | grep -m 1 -E '^ *[0-9]+\) [0-9A-F]{40} "Apple Development: '); then
+        :
+    elif MATCH=$(print -r -- "$ALL_IDENTITIES" | grep -m 1 -F "\"$LOCAL_IDENTITY\""); then
+        :
+    else
+        MATCH=""
+    fi
+    if [[ -n "$MATCH" ]]; then
+        # Sign by SHA-1 so an older certificate with the same name cannot be picked instead.
+        SIGN_IDENTITY=$(print -r -- "$MATCH" | sed -E 's/^ *[0-9]+\) ([0-9A-F]{40}) .*/\1/')
+        SIGN_LABEL=$(print -r -- "$MATCH" | sed -E 's/^[^"]*"([^"]*)".*/\1/')
+    fi
+fi
+
+if [[ -n "$SIGN_IDENTITY" ]]; then
+    echo "Signing with: $SIGN_LABEL"
+    codesign --force --deep --timestamp=none --sign "$SIGN_IDENTITY" "$APP_DIR"
+else
+    echo "Signing ad-hoc (no signing identity found; see README, Code signing)"
+    codesign --force --deep --sign - "$APP_DIR"
+fi
 echo "$APP_DIR"
