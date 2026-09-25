@@ -89,18 +89,39 @@ struct UsagePopoverView: View {
     }
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: 12) {
             if let lastUpdated = store.lastUpdated {
                 Text("Updated \(lastUpdated, style: .relative) ago")
             } else {
                 Text("Not updated yet")
             }
+
             Spacer()
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
+
+            Button {
+                SettingsWindowController.shared.show(
+                    settingsStore: store.settingsStore,
+                    notificationService: store.notificationService
+                )
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 13))
             }
             .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help("Settings")
+            .accessibilityLabel("Settings")
+
+            Button {
+                NSApplication.shared.terminate(nil)
+            } label: {
+                Text("Quit")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
             .keyboardShortcut("q")
+            .help("Quit Agent Allowance")
+            .accessibilityLabel("Quit")
         }
         .font(.caption)
         .foregroundStyle(.secondary)

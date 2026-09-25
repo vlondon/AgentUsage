@@ -87,6 +87,35 @@ All percentages mean **allowance remaining**:
 
 Tap the menu-bar gauge to refresh data that is more than a minute old, or use the refresh button for an immediate update.
 
+## Push Notifications
+
+Agent Allowance supports notifications when your session or weekly allowances refresh:
+
+- **macOS Notifications:** Local alerts with native system banners and sounds.
+- **iPhone Notifications:** Direct push notifications to your iPhone via **Pushover** (instant & reliable) or **ntfy** (free & open-source).
+
+### iPhone Setup with Pushover (Recommended)
+
+1. Install **Pushover** on your iPhone from the App Store.
+2. Open Settings in Agent Allowance (gear icon in footer) and enable **iPhone Notifications** -> **Pushover.net**.
+3. Enter your **User Key** from your [pushover.net](https://pushover.net) dashboard.
+4. Create an Application API Token on pushover.net (takes 10 seconds) and enter it in Agent Allowance.
+5. Tap **Test Pushover** to confirm delivery to your iPhone!
+
+### iPhone Setup with ntfy
+
+1. Install the free **ntfy** app on iOS from the App Store.
+2. Open Settings in Agent Allowance and choose **ntfy.sh**.
+3. Use the auto-generated private topic name or enter a custom one (e.g. `allowance-a1b2c3d4`).
+4. In the ntfy app on your iPhone, subscribe to that same topic name.
+5. Tap **Test ntfy** in Settings to confirm delivery!
+
+Notification triggers can be configured in Settings for:
+- Allowance resets (when a 5-hour session or weekly pool refreshes)
+- Low allowance alerts (when remaining allowance drops to or below a configurable threshold, e.g. 10%)
+
+Pushover and Simplepush keys are stored in the macOS Keychain, not in the app's preferences. If the Keychain refuses a key, Settings shows the error; a newly entered key is kept only in memory until the Keychain accepts it, never written to the preferences file. An alert that fails to send is retried on the next background checks, up to three attempts, and only on the channels that missed it.
+
 ## License
 
 Released under the [MIT License](LICENSE).
