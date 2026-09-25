@@ -3,6 +3,7 @@ import SwiftUI
 
 struct UsagePopoverView: View {
     let store: UsageStore
+    @State private var popoverWindow = WindowReference()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -99,6 +100,9 @@ struct UsagePopoverView: View {
             Spacer()
 
             Button {
+                // The popover floats above normal windows, so close it rather than
+                // leave it covering Settings. MenuBarExtra ignores `dismiss`.
+                popoverWindow.window?.close()
                 SettingsWindowController.shared.show(
                     settingsStore: store.settingsStore,
                     notificationService: store.notificationService
@@ -127,5 +131,40 @@ struct UsagePopoverView: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 16)
         .padding(.vertical, 9)
+        .background(WindowReader { popoverWindow.window = $0 })
+    }
+}
+
+private final class WindowReference {
+    weak var window: NSWindow?
+}
+
+/// Reports the NSWindow hosting a SwiftUI view whenever the view moves to a window.
+private struct WindowReader: NSViewRepresentable {
+    let onWindowChange: (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        WindowReaderView(onWindowChange: onWindowChange)
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class WindowReaderView: NSView {
+        let onWindowChange: (NSWindow?) -> Void
+
+        init(onWindowChange: @escaping (NSWindow?) -> Void) {
+            self.onWindowChange = onWindowChange
+            super.init(frame: .zero)
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            onWindowChange(window)
+        }
     }
 }
