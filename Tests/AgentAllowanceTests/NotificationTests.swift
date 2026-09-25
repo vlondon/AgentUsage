@@ -53,6 +53,23 @@ final class MockNotificationSender: NotificationSenderProtocol, @unchecked Senda
     }
 }
 
+final class CallCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+
+    func increment() {
+        lock.lock()
+        defer { lock.unlock() }
+        count += 1
+    }
+}
+
 final class InMemorySecretStore: SecretStore, @unchecked Sendable {
     private let lock = NSLock()
     private var values: [String: String] = [:]
@@ -149,22 +166,22 @@ final class NotificationTests: XCTestCase {
 
         let secrets = InMemorySecretStore()
         let store = SettingsStore(userDefaults: userDefaults, secretStore: secrets)
-        var timerCallbackCount = 0
+        let timerCallbackCount = CallCounter()
         store.onSettingsChanged = {
-            timerCallbackCount += 1
+            timerCallbackCount.increment()
         }
 
         // Modifying timer-relevant field fires callback
         store.settings.macNotificationsEnabled = true
-        XCTAssertEqual(timerCallbackCount, 1)
+        XCTAssertEqual(timerCallbackCount.value, 1)
 
         // Modifying non-timer field does not re-trigger timer callback
         store.settings.ntfyTopic = "agent-alerts-123"
-        XCTAssertEqual(timerCallbackCount, 1)
+        XCTAssertEqual(timerCallbackCount.value, 1)
 
         // Modifying interval fires callback
         store.settings.backgroundRefreshIntervalMinutes = 10
-        XCTAssertEqual(timerCallbackCount, 2)
+        XCTAssertEqual(timerCallbackCount.value, 2)
 
         // Read back in a fresh store instance
         let reloaded = SettingsStore(userDefaults: userDefaults, secretStore: secrets)
@@ -695,6 +712,25 @@ final class NotificationTests: XCTestCase {
         XCTAssertEqual(mock.sentMacPayloads.first?.delay, 10)
         XCTAssertEqual(mock.sentNtfyRequests.count, 1)
         XCTAssertEqual(mock.sentNtfyRequests.first?.delay, 10)
+    }
+
+    // MARK: - Unbundled process
+
+    func testLiveSenderIsSafeOutsideAnAppBundle() async {
+        // The test runner is not an .app bundle; touching UNUserNotificationCenter here would crash.
+        XCTAssertFalse(LiveNotificationSender.isRunningFromAppBundle)
+        let sender = LiveNotificationSender()
+
+        let authorized = await sender.requestMacAuthorization()
+        XCTAssertFalse(authorized)
+        let status = await sender.checkMacAuthorizationStatus()
+        XCTAssertEqual(status, .notDetermined)
+        do {
+            try await sender.sendMacNotification(payload: NotificationPayload(title: "T", body: "B"))
+            XCTFail("Expected Mac notifications to be unavailable outside an app bundle")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("packaged app"))
+        }
     }
 
     // MARK: - Credential storage

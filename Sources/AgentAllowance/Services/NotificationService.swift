@@ -83,12 +83,21 @@ protocol NotificationSenderProtocol: Sendable {
 struct LiveNotificationSender: NotificationSenderProtocol {
     private let urlSession: URLSession
 
+    /// UNUserNotificationCenter raises an exception when the process is not an app bundle
+    /// (for example `swift run`), so Mac notifications are only used from a packaged .app.
+    static var isRunningFromAppBundle: Bool {
+        Bundle.main.bundleURL.pathExtension == "app"
+    }
+
     init(urlSession: URLSession = .shared) {
         self.urlSession = urlSession
-        UNUserNotificationCenter.current().delegate = NotificationCenterDelegate.shared
+        if Self.isRunningFromAppBundle {
+            UNUserNotificationCenter.current().delegate = NotificationCenterDelegate.shared
+        }
     }
 
     func requestMacAuthorization() async -> Bool {
+        guard Self.isRunningFromAppBundle else { return false }
         let center = UNUserNotificationCenter.current()
         do {
             return try await center.requestAuthorization(options: [.alert, .sound])
@@ -98,12 +107,20 @@ struct LiveNotificationSender: NotificationSenderProtocol {
     }
 
     func checkMacAuthorizationStatus() async -> UNAuthorizationStatus {
+        guard Self.isRunningFromAppBundle else { return .notDetermined }
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         return settings.authorizationStatus
     }
 
     func sendMacNotification(payload: NotificationPayload, delaySeconds: TimeInterval? = nil) async throws {
+        guard Self.isRunningFromAppBundle else {
+            throw NSError(
+                domain: "NotificationError",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Mac notifications need the packaged app (scripts/package_app.sh)."]
+            )
+        }
         let center = UNUserNotificationCenter.current()
         var status = await center.notificationSettings().authorizationStatus
         if status == .notDetermined,
