@@ -105,18 +105,14 @@ struct LiveNotificationSender: NotificationSenderProtocol {
 
     func sendMacNotification(payload: NotificationPayload, delaySeconds: TimeInterval? = nil) async throws {
         let center = UNUserNotificationCenter.current()
-        let settings = await center.notificationSettings()
-
-        var status = settings.authorizationStatus
-        if status == .notDetermined {
-            let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
-            if granted {
-                status = .authorized
-            }
+        var status = await center.notificationSettings().authorizationStatus
+        if status == .notDetermined,
+           (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) != nil {
+            status = await center.notificationSettings().authorizationStatus
         }
 
-        var unSuccess = false
-        if status == .authorized || status == .provisional {
+        switch status {
+        case .authorized, .provisional, .ephemeral:
             let content = UNMutableNotificationContent()
             content.title = payload.title
             content.body = payload.body
@@ -138,58 +134,61 @@ struct LiveNotificationSender: NotificationSenderProtocol {
                 content: content,
                 trigger: trigger
             )
-            do {
-                try await center.add(request)
-                unSuccess = true
-            } catch {
-                unSuccess = false
-            }
-        }
-
-        // Fallback to system notification only if UNUserNotificationCenter is not available/authorized
-        if !unSuccess {
-            Self.postAppleScriptNotification(
-                title: payload.title,
-                body: payload.body,
-                delaySeconds: delaySeconds
+            try await center.add(request)
+        case .denied:
+            throw NSError(
+                domain: "NotificationError",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Notification permission denied in macOS System Settings."]
             )
+        default:
+            // The permission prompt could not be shown (for example an unregistered app bundle),
+            // so the user has never answered it. Fall back to an AppleScript notification.
+            if let delaySeconds, delaySeconds > 0 {
+                try await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
+            }
+            try await Self.postAppleScriptNotification(title: payload.title, body: payload.body)
         }
     }
+
+    private static let iconAttachmentDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("AgentAllowanceNotificationIcons", isDirectory: true)
 
     private static func createIconAttachment() -> UNNotificationAttachment? {
         guard let sourceUrl = Bundle.main.url(forResource: "simple-gauge", withExtension: "png") ??
                              Bundle.main.url(forResource: "push-icon", withExtension: "png") else {
             return nil
         }
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let targetUrl = tempDir.appendingPathComponent("icon.png")
+        // The notification store moves the file out when the request is added, so each
+        // attachment gets its own file name inside one reused directory.
+        let targetUrl = iconAttachmentDirectory.appendingPathComponent("\(UUID().uuidString).png")
         do {
-            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: iconAttachmentDirectory, withIntermediateDirectories: true)
             try FileManager.default.copyItem(at: sourceUrl, to: targetUrl)
             return try UNNotificationAttachment(identifier: "icon", url: targetUrl, options: nil)
         } catch {
+            try? FileManager.default.removeItem(at: targetUrl)
             return nil
         }
     }
 
-    private static func postAppleScriptNotification(title: String, body: String, delaySeconds: TimeInterval?) {
-        let work = {
-            let safeTitle = title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-            let safeBody = body.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-            let source = "display notification \"\(safeBody)\" with title \"\(safeTitle)\" sound name \"default\""
-            if let appleScript = NSAppleScript(source: source) {
-                var error: NSDictionary?
-                appleScript.executeAndReturnError(&error)
-            }
+    @MainActor
+    private static func postAppleScriptNotification(title: String, body: String) throws {
+        let safeTitle = title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        let safeBody = body.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        let source = "display notification \"\(safeBody)\" with title \"\(safeTitle)\" sound name \"default\""
+        guard let appleScript = NSAppleScript(source: source) else {
+            throw NSError(
+                domain: "NotificationError",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Could not create the fallback notification script."]
+            )
         }
-
-        if let delaySeconds, delaySeconds > 0 {
-            Task {
-                try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
-                await MainActor.run { work() }
-            }
-        } else {
-            work()
+        var error: NSDictionary?
+        appleScript.executeAndReturnError(&error)
+        if let error {
+            let message = error[NSAppleScript.errorMessage] as? String ?? "Fallback notification failed."
+            throw NSError(domain: "NotificationError", code: 3, userInfo: [NSLocalizedDescriptionKey: message])
         }
     }
 
@@ -233,13 +232,9 @@ struct LiveNotificationSender: NotificationSenderProtocol {
         }
 
         if let delaySeconds, delaySeconds > 0 {
-            Task {
-                try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
-                try? await sendWork()
-            }
-        } else {
-            try await sendWork()
+            try await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
         }
+        try await sendWork()
     }
 
     func sendSimplepushNotification(payload: NotificationPayload, key: String, delaySeconds: TimeInterval? = nil) async throws {
@@ -267,18 +262,16 @@ struct LiveNotificationSender: NotificationSenderProtocol {
         }
 
         if let delaySeconds, delaySeconds > 0 {
-            Task {
-                try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
-                try? await sendWork()
-            }
-        } else {
-            try await sendWork()
+            try await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
         }
+        try await sendWork()
     }
 }
 
 struct NotificationService: Sendable {
     private let sender: any NotificationSenderProtocol
+
+    static let requestTimeout: TimeInterval = 15
 
     init(sender: any NotificationSenderProtocol = LiveNotificationSender()) {
         self.sender = sender
@@ -328,6 +321,7 @@ struct NotificationService: Sendable {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = requestTimeout
         request.setValue("AgentAllowance/1.0", forHTTPHeaderField: "User-Agent")
         request.setValue(payload.title, forHTTPHeaderField: "Title")
         request.setValue("\(payload.priority)", forHTTPHeaderField: "Priority")
@@ -376,6 +370,7 @@ struct NotificationService: Sendable {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = requestTimeout
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
 
         let bodyDict: [String: Any] = [
@@ -414,6 +409,7 @@ struct NotificationService: Sendable {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = requestTimeout
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
 
         let bodyDict: [String: Any] = [

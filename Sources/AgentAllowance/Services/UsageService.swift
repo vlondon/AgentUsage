@@ -73,6 +73,7 @@ final class UsageStore {
     private let service: UsageService
     private var refreshTask: Task<Void, Never>?
     private var backgroundTimerTask: Task<Void, Never>?
+    private var deliveryTask: Task<Void, Never>?
 
     let settingsStore: SettingsStore
     let notificationService: NotificationService
@@ -128,22 +129,38 @@ final class UsageStore {
             usages[index].isLoading = true
         }
 
-        let task = Task { [service, settingsStore, notificationService, notificationMonitor] in
+        let task = Task { [service, notificationMonitor] in
             let results = await service.fetchAll()
             guard !Task.isCancelled else { return }
 
-            let payloads = notificationMonitor.evaluate(usages: results, settings: settingsStore.settings)
-            for payload in payloads {
-                _ = await notificationService.dispatch(payload: payload, settings: settingsStore.settings)
-            }
+            _ = notificationMonitor.evaluate(usages: results, settings: settingsStore.settings)
 
             usages = results
             lastUpdated = Date()
             isRefreshing = false
             refreshTask = nil
+
+            deliverPendingAlerts()
         }
         refreshTask = task
         await task.value
+    }
+
+    /// Sends queued alerts without holding up the refresh. Only one pass runs at a time, and each
+    /// alert is re-checked against the queue and current settings right before it is sent.
+    /// Alerts that fail stay queued in the monitor and are retried after the next poll.
+    private func deliverPendingAlerts() {
+        guard deliveryTask == nil else { return }
+
+        deliveryTask = Task { [notificationService, notificationMonitor] in
+            var attempted: Set<String> = []
+            while let delivery = notificationMonitor.nextDelivery(settings: settingsStore.settings, skipping: attempted) {
+                attempted.insert(delivery.payload.identifier)
+                let result = await notificationService.dispatch(payload: delivery.payload, settings: delivery.settings)
+                notificationMonitor.recordDelivery(result, for: delivery.payload.identifier)
+            }
+            deliveryTask = nil
+        }
     }
 
     func updateBackgroundTimer() {

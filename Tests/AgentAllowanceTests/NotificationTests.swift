@@ -53,7 +53,38 @@ final class MockNotificationSender: NotificationSenderProtocol, @unchecked Senda
     }
 }
 
+final class InMemorySecretStore: SecretStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: String] = [:]
+    var failWrites = false
+    var failReads = false
+
+    func read(_ account: String) throws -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        if failReads { throw NSError(domain: "InMemorySecretStore", code: 2) }
+        return values[account]
+    }
+
+    func write(_ value: String, for account: String) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        if failWrites { throw NSError(domain: "InMemorySecretStore", code: 1) }
+        values[account] = value.isEmpty ? nil : value
+    }
+}
+
 final class NotificationTests: XCTestCase {
+
+    private func claudeSession(_ percent: Double) -> [ProviderUsage] {
+        [
+            ProviderUsage(
+                provider: .claude,
+                windows: [AllowanceWindow(id: "session", label: "5h session", remainingPercent: percent, resetAt: nil)],
+                isLoading: false
+            )
+        ]
+    }
 
     // MARK: - NotificationSettings Tests
 
@@ -116,7 +147,8 @@ final class NotificationTests: XCTestCase {
         let userDefaults = UserDefaults(suiteName: suiteName)!
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
 
-        let store = SettingsStore(userDefaults: userDefaults)
+        let secrets = InMemorySecretStore()
+        let store = SettingsStore(userDefaults: userDefaults, secretStore: secrets)
         var timerCallbackCount = 0
         store.onSettingsChanged = {
             timerCallbackCount += 1
@@ -135,7 +167,7 @@ final class NotificationTests: XCTestCase {
         XCTAssertEqual(timerCallbackCount, 2)
 
         // Read back in a fresh store instance
-        let reloaded = SettingsStore(userDefaults: userDefaults)
+        let reloaded = SettingsStore(userDefaults: userDefaults, secretStore: secrets)
         XCTAssertTrue(reloaded.settings.macNotificationsEnabled)
         XCTAssertEqual(reloaded.settings.ntfyTopic, "agent-alerts-123")
         XCTAssertEqual(reloaded.settings.backgroundRefreshIntervalMinutes, 10)
@@ -663,5 +695,312 @@ final class NotificationTests: XCTestCase {
         XCTAssertEqual(mock.sentMacPayloads.first?.delay, 10)
         XCTAssertEqual(mock.sentNtfyRequests.count, 1)
         XCTAssertEqual(mock.sentNtfyRequests.first?.delay, 10)
+    }
+
+    // MARK: - Credential storage
+
+    @MainActor
+    func testSettingsStoreKeepsPushCredentialsOutOfUserDefaults() throws {
+        let suiteName = "test_settings_\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let secrets = InMemorySecretStore()
+
+        let store = SettingsStore(userDefaults: userDefaults, secretStore: secrets)
+        store.settings.pushoverUserKey = "user-abc"
+        store.settings.pushoverApiToken = "token-xyz"
+        store.settings.simplepushKey = "simple-123"
+
+        let stored = try XCTUnwrap(userDefaults.data(forKey: "com.vlondon.AgentAllowance.NotificationSettings"))
+        let storedJson = String(decoding: stored, as: UTF8.self)
+        XCTAssertFalse(storedJson.contains("user-abc"))
+        XCTAssertFalse(storedJson.contains("token-xyz"))
+        XCTAssertFalse(storedJson.contains("simple-123"))
+        XCTAssertEqual(try secrets.read("pushoverApiToken"), "token-xyz")
+
+        let reloaded = SettingsStore(userDefaults: userDefaults, secretStore: secrets)
+        XCTAssertEqual(reloaded.settings.pushoverUserKey, "user-abc")
+        XCTAssertEqual(reloaded.settings.pushoverApiToken, "token-xyz")
+        XCTAssertEqual(reloaded.settings.simplepushKey, "simple-123")
+
+        // Clearing a field removes it from the secret store
+        reloaded.settings.simplepushKey = ""
+        XCTAssertNil(try secrets.read("simplepushKey"))
+    }
+
+    @MainActor
+    func testSettingsStoreMigratesLegacyCredentialsFromUserDefaults() throws {
+        let suiteName = "test_settings_\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let key = "com.vlondon.AgentAllowance.NotificationSettings"
+        let legacyJson = #"{"iphoneNotificationsEnabled": true, "pushoverUserKey": "legacy-user", "pushoverApiToken": "legacy-token"}"#
+        userDefaults.set(Data(legacyJson.utf8), forKey: key)
+
+        let secrets = InMemorySecretStore()
+        let store = SettingsStore(userDefaults: userDefaults, secretStore: secrets)
+
+        XCTAssertEqual(store.settings.pushoverUserKey, "legacy-user")
+        XCTAssertEqual(try secrets.read("pushoverUserKey"), "legacy-user")
+        XCTAssertEqual(try secrets.read("pushoverApiToken"), "legacy-token")
+        let rewritten = String(decoding: try XCTUnwrap(userDefaults.data(forKey: key)), as: UTF8.self)
+        XCTAssertFalse(rewritten.contains("legacy-token"))
+        XCTAssertTrue(store.settings.iphoneNotificationsEnabled)
+    }
+
+    @MainActor
+    func testSettingsStoreKeepsLegacyCredentialsWhenSecretStoreFails() throws {
+        let suiteName = "test_settings_\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let key = "com.vlondon.AgentAllowance.NotificationSettings"
+        let legacyJson = #"{"simplepushKey": "legacy-simple"}"#
+        userDefaults.set(Data(legacyJson.utf8), forKey: key)
+
+        let secrets = InMemorySecretStore()
+        secrets.failWrites = true
+        let store = SettingsStore(userDefaults: userDefaults, secretStore: secrets)
+
+        XCTAssertEqual(store.settings.simplepushKey, "legacy-simple")
+        XCTAssertNotNil(store.credentialStorageError)
+
+        // An unrelated change rewrites the settings JSON; the credential must survive a restart
+        store.settings.backgroundRefreshIntervalMinutes = 10
+        let restarted = SettingsStore(userDefaults: userDefaults, secretStore: secrets)
+        XCTAssertEqual(restarted.settings.simplepushKey, "legacy-simple")
+        XCTAssertEqual(restarted.settings.backgroundRefreshIntervalMinutes, 10)
+
+        // Once the Keychain works again the credential moves there and the fallback is cleared
+        secrets.failWrites = false
+        let recovered = SettingsStore(userDefaults: userDefaults, secretStore: secrets)
+        XCTAssertEqual(try secrets.read("simplepushKey"), "legacy-simple")
+        XCTAssertNil(recovered.credentialStorageError)
+        XCTAssertNil(userDefaults.object(forKey: "com.vlondon.AgentAllowance.UnsyncedSecrets"))
+        let rewritten = String(decoding: try XCTUnwrap(userDefaults.data(forKey: key)), as: UTF8.self)
+        XCTAssertFalse(rewritten.contains("legacy-simple"))
+    }
+
+    /// Every string stored in a defaults suite, including JSON blobs and nested dictionaries.
+    private func storedStrings(inSuite suiteName: String) -> [String] {
+        func strings(in value: Any) -> [String] {
+            switch value {
+            case let string as String: return [string]
+            case let data as Data: return [String(decoding: data, as: UTF8.self)]
+            case let dict as [String: Any]: return dict.flatMap { [$0.key] + strings(in: $0.value) }
+            case let array as [Any]: return array.flatMap(strings(in:))
+            default: return []
+            }
+        }
+        return strings(in: UserDefaults.standard.persistentDomain(forName: suiteName) ?? [:])
+    }
+
+    @MainActor
+    func testSettingsStoreNeverPersistsNewKeyWhenKeychainRefusesIt() {
+        let suiteName = "test_settings_\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let secrets = InMemorySecretStore()
+        secrets.failWrites = true
+
+        let store = SettingsStore(userDefaults: userDefaults, secretStore: secrets)
+        store.settings.simplepushKey = "brand-new-secret"
+        store.settings.backgroundRefreshIntervalMinutes = 10
+
+        XCTAssertEqual(store.settings.simplepushKey, "brand-new-secret", "The key stays usable in memory")
+        XCTAssertTrue(store.credentialStorageError?.contains("lost when the app quits") ?? false)
+        XCTAssertFalse(
+            storedStrings(inSuite: suiteName).contains { $0.contains("brand-new-secret") },
+            "A new credential must never be written to UserDefaults"
+        )
+
+        // Retried on the next save; succeeds once the Keychain accepts writes again
+        secrets.failWrites = false
+        store.settings.backgroundRefreshIntervalMinutes = 15
+        XCTAssertEqual(try secrets.read("simplepushKey"), "brand-new-secret")
+        XCTAssertNil(store.credentialStorageError)
+    }
+
+    @MainActor
+    func testSettingsStoreKeepsReadErrorUntilRetrySucceeds() throws {
+        let suiteName = "test_settings_\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let secrets = InMemorySecretStore()
+        try secrets.write("stored-key", for: "simplepushKey")
+        secrets.failReads = true
+
+        let store = SettingsStore(userDefaults: userDefaults, secretStore: secrets)
+        XCTAssertEqual(store.settings.simplepushKey, "")
+        XCTAssertNotNil(store.credentialStorageError)
+
+        // An unrelated change must not hide the read failure or touch the stored key
+        store.settings.backgroundRefreshIntervalMinutes = 10
+        XCTAssertNotNil(store.credentialStorageError)
+        secrets.failReads = false
+        XCTAssertEqual(try secrets.read("simplepushKey"), "stored-key")
+
+        store.retryFailedCredentialReads()
+        XCTAssertEqual(store.settings.simplepushKey, "stored-key")
+        XCTAssertNil(store.credentialStorageError)
+    }
+
+    @MainActor
+    func testSettingsStoreFailedDeleteDoesNotResurrectOldKey() throws {
+        let suiteName = "test_settings_\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let secrets = InMemorySecretStore()
+
+        let store = SettingsStore(userDefaults: userDefaults, secretStore: secrets)
+        store.settings.simplepushKey = "old-key"
+        XCTAssertEqual(try secrets.read("simplepushKey"), "old-key")
+
+        secrets.failWrites = true
+        store.settings.simplepushKey = ""
+        XCTAssertNotNil(store.credentialStorageError)
+
+        let restarted = SettingsStore(userDefaults: userDefaults, secretStore: secrets)
+        XCTAssertEqual(restarted.settings.simplepushKey, "", "A cleared key must stay cleared after restart")
+    }
+
+    // MARK: - Reset state and delivery retries
+
+    func testMonitorDoesNotReplayRefillAfterResetAlertsAreEnabled() {
+        let monitor = AllowanceNotificationMonitor()
+        var settings = NotificationSettings(
+            macNotificationsEnabled: true,
+            notifyOnReset: false,
+            notifyOnLowAllowance: true
+        )
+
+        _ = monitor.evaluate(usages: claudeSession(0), settings: settings)
+        XCTAssertTrue(monitor.evaluate(usages: claudeSession(100), settings: settings).isEmpty)
+
+        // Turning reset alerts on afterwards must not report the refill that already happened
+        settings.notifyOnReset = true
+        let payloads = monitor.evaluate(usages: claudeSession(90), settings: settings)
+        XCTAssertTrue(payloads.isEmpty, "A decreasing allowance must not produce a reset alert")
+    }
+
+    func testMonitorDoesNotReplayRefillAfterNotificationsAreEnabled() {
+        let monitor = AllowanceNotificationMonitor()
+        var settings = NotificationSettings(notifyOnReset: true)
+
+        _ = monitor.evaluate(usages: claudeSession(0), settings: settings)
+        _ = monitor.evaluate(usages: claudeSession(100), settings: settings)
+
+        settings.macNotificationsEnabled = true
+        XCTAssertTrue(monitor.evaluate(usages: claudeSession(90), settings: settings).isEmpty)
+    }
+
+    func testMonitorRetriesOnlyTheChannelThatFailed() throws {
+        let monitor = AllowanceNotificationMonitor()
+        let settings = NotificationSettings(
+            macNotificationsEnabled: true,
+            iphoneNotificationsEnabled: true,
+            iphoneService: .ntfy,
+            ntfyTopic: "retry-topic",
+            notifyOnReset: true
+        )
+
+        _ = monitor.evaluate(usages: claudeSession(0), settings: settings)
+        let raised = monitor.evaluate(usages: claudeSession(100), settings: settings)
+        XCTAssertEqual(raised.count, 1)
+
+        let first = try XCTUnwrap(monitor.nextDelivery(settings: settings))
+        XCTAssertTrue(first.settings.macNotificationsEnabled)
+        XCTAssertTrue(first.settings.iphoneNotificationsEnabled)
+        XCTAssertNil(monitor.nextDelivery(settings: settings, skipping: [first.payload.identifier]))
+        monitor.recordDelivery(
+            NotificationDispatchResult(macSuccess: true, iphoneSuccess: false, iphoneError: "HTTP 502"),
+            for: first.payload.identifier
+        )
+
+        // Next poll: nothing new is raised, but the iPhone copy is retried with the same payload
+        XCTAssertTrue(monitor.evaluate(usages: claudeSession(99), settings: settings).isEmpty)
+        let retry = try XCTUnwrap(monitor.nextDelivery(settings: settings))
+        XCTAssertEqual(retry.payload, first.payload)
+        XCTAssertFalse(retry.settings.macNotificationsEnabled)
+        XCTAssertTrue(retry.settings.iphoneNotificationsEnabled)
+
+        monitor.recordDelivery(NotificationDispatchResult(iphoneSuccess: true), for: retry.payload.identifier)
+        XCTAssertEqual(monitor.pendingCount(), 0)
+        XCTAssertNil(monitor.nextDelivery(settings: settings))
+    }
+
+    func testMonitorGivesUpAfterMaxDeliveryAttempts() throws {
+        let monitor = AllowanceNotificationMonitor()
+        let settings = NotificationSettings(macNotificationsEnabled: true, notifyOnReset: true)
+
+        _ = monitor.evaluate(usages: claudeSession(0), settings: settings)
+        _ = monitor.evaluate(usages: claudeSession(100), settings: settings)
+
+        for _ in 0..<AllowanceNotificationMonitor.maxDeliveryAttempts {
+            let delivery = try XCTUnwrap(monitor.nextDelivery(settings: settings))
+            monitor.recordDelivery(
+                NotificationDispatchResult(macSuccess: false, macError: "offline"),
+                for: delivery.payload.identifier
+            )
+        }
+        XCTAssertEqual(monitor.pendingCount(), 0)
+    }
+
+    func testMonitorDropsStalePendingAlerts() {
+        let monitor = AllowanceNotificationMonitor()
+        var settings = NotificationSettings(
+            macNotificationsEnabled: true,
+            notifyOnReset: true,
+            notifyOnLowAllowance: true,
+            lowAllowanceThreshold: 10
+        )
+
+        // Undelivered low alert is dropped once the allowance recovers above the threshold
+        _ = monitor.evaluate(usages: claudeSession(40), settings: settings)
+        XCTAssertEqual(monitor.evaluate(usages: claudeSession(8), settings: settings).count, 1)
+        XCTAssertEqual(monitor.pendingCount(), 1)
+        _ = monitor.evaluate(usages: claudeSession(60), settings: settings)
+        XCTAssertEqual(monitor.pendingCount(), 0)
+
+        // Undelivered reset alert is dropped when reset alerts are switched off
+        _ = monitor.evaluate(usages: claudeSession(0), settings: settings)
+        XCTAssertEqual(monitor.evaluate(usages: claudeSession(100), settings: settings).count, 1)
+        settings.notifyOnReset = false
+        XCTAssertNil(monitor.nextDelivery(settings: settings))
+        XCTAssertEqual(monitor.pendingCount(), 0)
+    }
+
+    func testNextDeliveryAppliesSettingsChangedMidPass() throws {
+        let monitor = AllowanceNotificationMonitor()
+        var settings = NotificationSettings(
+            macNotificationsEnabled: true,
+            iphoneNotificationsEnabled: true,
+            iphoneService: .ntfy,
+            ntfyTopic: "mid-pass",
+            notifyOnReset: true
+        )
+        let twoWindows: (Double) -> [ProviderUsage] = { percent in
+            [
+                ProviderUsage(
+                    provider: .claude,
+                    windows: [
+                        AllowanceWindow(id: "session", label: "5h session", remainingPercent: percent, resetAt: nil),
+                        AllowanceWindow(id: "weekly", label: "Weekly", remainingPercent: percent, resetAt: nil)
+                    ],
+                    isLoading: false
+                )
+            ]
+        }
+        _ = monitor.evaluate(usages: twoWindows(0), settings: settings)
+        XCTAssertEqual(monitor.evaluate(usages: twoWindows(100), settings: settings).count, 2)
+
+        let first = try XCTUnwrap(monitor.nextDelivery(settings: settings))
+        XCTAssertTrue(first.settings.iphoneNotificationsEnabled)
+
+        // The iPhone channel is switched off while the first send is in flight
+        settings.iphoneNotificationsEnabled = false
+        let second = try XCTUnwrap(monitor.nextDelivery(settings: settings, skipping: [first.payload.identifier]))
+        XCTAssertNotEqual(second.payload.identifier, first.payload.identifier)
+        XCTAssertFalse(second.settings.iphoneNotificationsEnabled)
+        XCTAssertTrue(second.settings.macNotificationsEnabled)
     }
 }

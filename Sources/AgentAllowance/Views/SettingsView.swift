@@ -56,6 +56,7 @@ struct SettingsView: View {
         .frame(width: 530, height: 700)
         .onAppear {
             refreshPermissionStatus()
+            settingsStore.retryFailedCredentialReads()
         }
         .task {
             refreshPermissionStatus()
@@ -187,6 +188,13 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            }
+
+            if let credentialStorageError = settingsStore.credentialStorageError {
+                Label(credentialStorageError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(Color.red)
+                    .padding(.leading, 24)
             }
 
             if settingsStore.settings.iphoneNotificationsEnabled {
@@ -622,7 +630,15 @@ struct SettingsView: View {
             let result = await notificationService.sendTestIphoneNotification(delaySeconds: delay, settings: settingsStore.settings)
             isIphoneTesting = false
             iphoneTestIsSuccess = result.iphoneSuccess == true
-            let suffix = delay != nil ? " (will deliver in \(Int(delay!))s)" : ""
+            // ntfy schedules the delay server-side; Pushover and Simplepush wait locally before sending.
+            let suffix: String
+            if let delay {
+                suffix = settingsStore.settings.iphoneService == .ntfy
+                    ? " (will deliver in \(Int(delay))s)"
+                    : " after a \(Int(delay))s delay"
+            } else {
+                suffix = ""
+            }
             iphoneTestStatus = result.iphoneSuccess == true ? "\(settingsStore.settings.iphoneService.rawValue) test push sent\(suffix)!" : (result.iphoneError ?? "Failed to send iPhone push")
         }
     }
@@ -641,7 +657,7 @@ struct SettingsView: View {
             }
             isOverallTesting = false
             overallTestIsSuccess = result.isSuccess
-            let delayNotice = delay != nil ? " (scheduled to fire in \(Int(delay!))s — you can switch windows/apps now!)" : ""
+            let delayNotice = delay.map { " (\(Int($0))s delay)" } ?? ""
             overallTestStatus = result.summaryDescription + delayNotice
             macPermissionStatus = await notificationService.checkMacAuthorizationStatus()
         }

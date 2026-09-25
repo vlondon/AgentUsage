@@ -114,6 +114,8 @@ Notification triggers can be configured in Settings for:
 - Allowance resets (when a 5-hour session or weekly pool refreshes)
 - Low allowance alerts (when remaining allowance drops to or below a configurable threshold, e.g. 10%)
 
+Pushover and Simplepush keys are stored in the macOS Keychain, not in the app's preferences. If the Keychain refuses a key, Settings shows the error; a newly entered key is kept only in memory until the Keychain accepts it, never written to the preferences file. An alert that fails to send is retried on the next background checks, up to three attempts, and only on the channels that missed it.
+
 ## License
 
 Released under the [MIT License](LICENSE).
