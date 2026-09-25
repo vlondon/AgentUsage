@@ -4,6 +4,22 @@ A small native macOS menu-bar app that shows the allowance remaining for Codex, 
 
 <img src="assets/example.png" alt="The Agent Allowance popover listing remaining allowance and reset time for each provider" width="456">
 
+## What's New
+
+### 2026-09-25
+
+- **Allowance notifications.** Get an alert when an allowance that ran out resets, or when one drops to a threshold you choose (5–20%). Alerts go to macOS Notification Center, to your iPhone through Pushover, Simplepush or ntfy, or both. Open Settings with the gear icon in the popover. See [Push Notifications](#push-notifications).
+- **Background checks** every 2–15 minutes while any notification channel is on, so alerts arrive without opening the popover. An alert that fails to send is retried, but only on the channels that missed it.
+- **Push keys in the Keychain.** Pushover and Simplepush keys are stored in the macOS Keychain, never in the preferences file.
+- **App icon** in the bundle, shown in Mac notifications.
+- **Settings opens in front.** The popover now closes when you click the gear.
+- **Stable signing for local builds.** `package_app.sh` signs with an Apple Development or self-signed certificate when one is available, so macOS stops asking for Keychain access after every rebuild. See [Code signing and Keychain prompts](#code-signing-and-keychain-prompts).
+
+### 2026-09-01
+
+- **First public release.** Allowance remaining and time to reset for Codex, Claude, Cursor, Devin, Grok Build, Grok Bot and Antigravity. Agents you have not installed are hidden.
+- **Claude weekly allowance fix.** After a change to Claude's usage endpoint, the weekly allowance could read 0% remaining at low usage; it now reads correctly. Plans with a model-specific weekly pool show it as its own row.
+
 ## What it reads
 
 - **Codex:** the authenticated local Codex app-server rate-limit method.
@@ -14,7 +30,7 @@ A small native macOS menu-bar app that shows the allowance remaining for Codex, 
 - **Grok Bot:** its separate SuperGrok usage pool, using Grok Bot's existing local Keychain-backed sign-in.
 - **Antigravity:** `agy -p "/usage"`, which reports separate Gemini and Claude/GPT pools.
 
-The app does not submit model prompts. Credentials are read only when refreshing and are never stored by Agent Allowance.
+The app does not submit model prompts. Provider credentials are read only when refreshing and are never stored by Agent Allowance.
 
 ## Requirements
 
@@ -30,7 +46,7 @@ errors worth acting on. If no agent is found at all, the popover says so.
 ## Setting up each provider
 
 Each provider reuses the sign-in that its own tool already stores. Agent
-Allowance never asks for credentials and never stores them.
+Allowance never asks for provider credentials and never stores them.
 
 | Provider | Install | Sign in | Allowance shown |
 |---|---|---|---|
@@ -108,34 +124,50 @@ Tap the menu-bar gauge to refresh data that is more than a minute old, or use th
 
 ## Push Notifications
 
-Agent Allowance supports notifications when your session or weekly allowances refresh:
+Agent Allowance can alert you when an allowance that ran out resets, or when one runs low. Open Settings with the gear icon in the popover footer and turn on either or both channels:
 
-- **macOS Notifications:** Local alerts with native system banners and sounds.
-- **iPhone Notifications:** Direct push notifications to your iPhone via **Pushover** (instant & reliable) or **ntfy** (free & open-source).
+- **Mac Notifications:** banners in macOS Notification Center. macOS asks for permission the first time; Settings shows whether it was granted.
+- **iPhone Notifications:** push notifications through **Pushover**, **Simplepush** or **ntfy**. Pick one with the Push Service control.
 
-### iPhone Setup with Pushover (Recommended)
+### Triggers
 
-1. Install **Pushover** on your iPhone from the App Store.
-2. Open Settings in Agent Allowance (gear icon in footer) and enable **iPhone Notifications** -> **Pushover.net**.
-3. Enter your **User Key** from your [pushover.net](https://pushover.net) dashboard.
-4. Create an Application API Token on pushover.net (takes 10 seconds) and enter it in Agent Allowance.
-5. Tap **Test Pushover** to confirm delivery to your iPhone!
+- **Reset:** when any allowance window (session, daily, weekly or billing cycle) that ran out (5% or less remaining) refills to at least 50%, or rises by 30 points or more. A window that resets before running out does not alert. On by default.
+- **Low allowance:** when an allowance drops to or below a threshold you choose: 5%, 10%, 15% or 20%. Off until you turn it on.
 
-### iPhone Setup with ntfy
+While any channel is on, the app checks in the background every 2, 5, 10 or 15 minutes (set in Settings), so alerts arrive without opening the popover. An alert that fails to send is retried on the next checks, up to three attempts, and only on the channels that missed it.
 
-1. Install the free **ntfy** app on iOS from the App Store.
-2. Open Settings in Agent Allowance and choose **ntfy.sh**.
-3. Use the auto-generated private topic name or enter a custom one (e.g. `allowance-a1b2c3d4`).
-4. In the ntfy app on your iPhone, subscribe to that same topic name.
-5. Tap **Test ntfy** in Settings to confirm delivery!
+Each channel has a test button and a **Test in 10s** button, so you can switch away and confirm that a delayed alert still arrives.
 
-Notification triggers can be configured in Settings for:
-- Allowance resets (when a 5-hour session or weekly pool refreshes)
-- Low allowance alerts (when remaining allowance drops to or below a configurable threshold, e.g. 10%)
+### iPhone setup with Pushover
+
+1. Install **Pushover** on your iPhone and sign in.
+2. In Settings, turn on **iPhone Notifications** and choose **Pushover.net**.
+3. Enter the **User Key** from your [pushover.net](https://pushover.net) dashboard.
+4. Pushover also needs an application token for the app sending the alerts. Use **Create App Token on pushover.net (10s)** in Settings, create an application, and paste its **API Token**.
+5. Click **Test Pushover**.
+
+### iPhone setup with Simplepush
+
+1. Install **Simplepush** on your iPhone. The app shows your key when it opens.
+2. In Settings, turn on **iPhone Notifications** and choose **Simplepush (Key only)**.
+3. Paste the key. Simplepush needs no account or app token.
+4. Click **Test Simplepush**.
+
+### iPhone setup with ntfy
+
+1. Install **ntfy** on your iPhone.
+2. In Settings, turn on **iPhone Notifications** and choose **ntfy.sh**.
+3. Enter a topic name, or click the dice button to generate a random one such as `allowance-a1b2c3d4`. Anyone who knows a topic name on ntfy.sh can read its messages, so use a name that is hard to guess.
+4. In the ntfy app, subscribe to the same topic. The copy button in Settings copies the name.
+5. Click **Test ntfy**.
+
+To use your own ntfy server, enter its address under **Advanced: Custom Server**.
+
+### Troubleshooting and storage
 
 If macOS notifications show a blank app icon after you build a version with a new icon, Notification Center may still be showing an icon it saved earlier. Running `killall NotificationCenter` (it relaunches right away) and sending a test notification can refresh it.
 
-Pushover and Simplepush keys are stored in the macOS Keychain, not in the app's preferences. If the Keychain refuses a key, Settings shows the error; a newly entered key is kept only in memory until the Keychain accepts it, never written to the preferences file. An alert that fails to send is retried on the next background checks, up to three attempts, and only on the channels that missed it.
+Pushover and Simplepush keys are stored in the macOS Keychain, not in the app's preferences. If the Keychain refuses a key, Settings shows the error; a newly entered key is kept only in memory until the Keychain accepts it, never written to the preferences file.
 
 ## License
 
