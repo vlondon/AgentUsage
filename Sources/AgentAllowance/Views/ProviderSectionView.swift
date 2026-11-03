@@ -38,6 +38,13 @@ struct ProviderSectionView: View {
                 }
             }
 
+            if usage.resetCredits.available > 0 {
+                Label(resetCreditsText, systemImage: "arrow.counterclockwise")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 24)
+            }
+
             if let error = usage.error {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
@@ -49,6 +56,15 @@ struct ProviderSectionView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+
+    private var resetCreditsText: String {
+        let count = usage.resetCredits.available
+        var text = count == 1 ? "1 reset credit" : "\(count) reset credits"
+        if let expiry = usage.resetCredits.nearestExpiry {
+            text += ", next expires \(expiry.formatted(.dateTime.month(.abbreviated).day()))"
+        }
+        return text
     }
 }
 

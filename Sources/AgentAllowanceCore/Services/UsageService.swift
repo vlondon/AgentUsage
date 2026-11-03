@@ -7,6 +7,25 @@ public protocol UsageProviderClient: Sendable {
     /// is installed but signed out still reports its error.
     func isInstalled() -> Bool
     func fetchWindows() async throws -> [AllowanceWindow]
+    /// Windows plus any reset credits from one provider call. Providers without
+    /// credits keep the default.
+    func fetchResult() async throws -> ProviderFetchResult
+}
+
+public struct ProviderFetchResult: Sendable {
+    public var windows: [AllowanceWindow]
+    public var resetCredits: ResetCredits
+
+    public init(windows: [AllowanceWindow], resetCredits: ResetCredits = .none) {
+        self.windows = windows
+        self.resetCredits = resetCredits
+    }
+}
+
+extension UsageProviderClient {
+    public func fetchResult() async throws -> ProviderFetchResult {
+        ProviderFetchResult(windows: try await fetchWindows())
+    }
 }
 
 public struct UsageService: Sendable {
@@ -44,12 +63,14 @@ public struct UsageService: Sendable {
             for client in clients where client.isInstalled() {
                 group.addTask {
                     do {
+                        let result = try await client.fetchResult()
                         return ProviderUsage(
                             provider: client.provider,
-                            windows: try await client.fetchWindows(),
+                            windows: result.windows,
                             error: nil,
                             fetchedAt: Date(),
-                            isLoading: false
+                            isLoading: false,
+                            resetCredits: result.resetCredits
                         )
                     } catch {
                         return ProviderUsage(

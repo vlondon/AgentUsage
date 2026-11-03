@@ -37,25 +37,65 @@ public struct AllowanceWindow: Identifiable, Equatable, Sendable {
     }
 }
 
+/// One earned credit that resets a provider's rate-limit windows when redeemed.
+/// Read-only here: nothing in this package ever redeems one.
+public struct ResetCredit: Equatable, Sendable {
+    public let id: String
+    public let title: String?
+    public let type: String
+    public let status: String
+    public let grantedAt: Date
+    public let expiresAt: Date?
+
+    public init(id: String, title: String?, type: String, status: String, grantedAt: Date, expiresAt: Date?) {
+        self.id = id
+        self.title = title
+        self.type = type
+        self.status = status
+        self.grantedAt = grantedAt
+        self.expiresAt = expiresAt
+    }
+}
+
+public struct ResetCredits: Equatable, Sendable {
+    public let available: Int
+    public let credits: [ResetCredit]
+
+    public static let none = ResetCredits(available: 0, credits: [])
+
+    public init(available: Int, credits: [ResetCredit]) {
+        self.available = available
+        self.credits = credits
+    }
+
+    /// The soonest expiry among available credits, if any expires.
+    public var nearestExpiry: Date? {
+        credits.filter { $0.status == "available" }.compactMap(\.expiresAt).min()
+    }
+}
+
 public struct ProviderUsage: Identifiable, Equatable, Sendable {
     public let provider: AgentProvider
     public var windows: [AllowanceWindow]
     public var error: String?
     public var fetchedAt: Date?
     public var isLoading: Bool
+    public var resetCredits: ResetCredits
 
     public init(
         provider: AgentProvider,
         windows: [AllowanceWindow],
         error: String? = nil,
         fetchedAt: Date? = nil,
-        isLoading: Bool = false
+        isLoading: Bool = false,
+        resetCredits: ResetCredits = .none
     ) {
         self.provider = provider
         self.windows = windows
         self.error = error
         self.fetchedAt = fetchedAt
         self.isLoading = isLoading
+        self.resetCredits = resetCredits
     }
 
     public var id: AgentProvider { provider }

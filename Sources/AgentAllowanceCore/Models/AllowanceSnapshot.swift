@@ -31,12 +31,48 @@ public struct AllowanceSnapshot: Codable, Equatable, Sendable {
         }
     }
 
+    public struct ResetCreditsJSON: Codable, Equatable, Sendable {
+        public struct Credit: Codable, Equatable, Sendable {
+            public var id: String
+            public var title: String?
+            public var type: String
+            public var status: String
+            public var grantedAt: Date
+            public var expiresAt: Date?
+
+            enum CodingKeys: String, CodingKey {
+                case id, title, type, status
+                case grantedAt = "granted_at"
+                case expiresAt = "expires_at"
+            }
+
+            public func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(id, forKey: .id)
+                try c.encode(title, forKey: .title)
+                try c.encode(type, forKey: .type)
+                try c.encode(status, forKey: .status)
+                try c.encode(grantedAt, forKey: .grantedAt)
+                try c.encode(expiresAt, forKey: .expiresAt)
+            }
+        }
+
+        public var available: Int
+        public var credits: [Credit]
+    }
+
     public struct Provider: Codable, Equatable, Sendable {
         public var id: String
         public var name: String
         public var installed: Bool
         public var error: String?
         public var windows: [Window]
+        public var resetCredits: ResetCreditsJSON
+
+        enum CodingKeys: String, CodingKey {
+            case id, name, installed, error, windows
+            case resetCredits = "reset_credits"
+        }
 
         public func encode(to encoder: Encoder) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
@@ -45,6 +81,7 @@ public struct AllowanceSnapshot: Codable, Equatable, Sendable {
             try c.encode(installed, forKey: .installed)
             try c.encode(error, forKey: .error)
             try c.encode(windows, forKey: .windows)
+            try c.encode(resetCredits, forKey: .resetCredits)
         }
     }
 
@@ -66,7 +103,8 @@ public struct AllowanceSnapshot: Codable, Equatable, Sendable {
             guard let usage = usages.first(where: { $0.provider == provider }) else {
                 return Provider(
                     id: provider.jsonID, name: provider.rawValue,
-                    installed: false, error: nil, windows: []
+                    installed: false, error: nil, windows: [],
+                    resetCredits: .init(available: 0, credits: [])
                 )
             }
             return Provider(
@@ -74,7 +112,14 @@ public struct AllowanceSnapshot: Codable, Equatable, Sendable {
                 name: provider.rawValue,
                 installed: true,
                 error: usage.error,
-                windows: usage.windows.map { Window(provider: provider, window: $0) }
+                windows: usage.windows.map { Window(provider: provider, window: $0) },
+                resetCredits: .init(
+                    available: usage.resetCredits.available,
+                    credits: usage.resetCredits.credits.map {
+                        .init(id: $0.id, title: $0.title, type: $0.type, status: $0.status,
+                              grantedAt: $0.grantedAt, expiresAt: $0.expiresAt)
+                    }
+                )
             )
         }
     }

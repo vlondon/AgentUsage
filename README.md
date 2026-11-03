@@ -128,6 +128,8 @@ Other local processes can read the same numbers as JSON (schema 1).
                 "resets_at": "2026-11-04T01:29:59Z", "window_minutes": 300, "scope": null}]}]}
 ```
 
+Every provider also has `reset_credits`: `{"available": <int>, "credits": [{"id", "title", "type", "status", "granted_at", "expires_at"}]}` (empty except for Codex, which reports its earned rate-limit reset credits; the popover shows their count and the nearest expiry). Agent Allowance only reads them and never redeems one. The addition is backwards compatible, so `schema` stays 1.
+
 Provider ids: `codex`, `claude`, `cursor`, `devin`, `grok_build`, `grok_bot`, `antigravity`. Window ids are `five_hour`, `weekly`, `daily`, `billing_cycle` (Devin's credits pool is `billing_cycle_credits`). A model or pool variant keeps the same id and sets `scope` (Claude model weekly: `weekly` with scope `opus`; Antigravity pools: `gemini`, `claude_gpt`). `remaining_pct` is 0-100, `resets_at` is UTC ISO 8601 or `null`, and `window_minutes` is `null` when the window has no fixed length. Identify a window by `id` plus `scope`.
 
 The models, provider clients and `UsageService` live in the `AgentAllowanceCore` library (no SwiftUI or AppKit); the app and `allowance` both depend on it.

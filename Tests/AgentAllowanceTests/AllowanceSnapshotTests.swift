@@ -79,3 +79,48 @@ final class AllowanceSnapshotTests: XCTestCase {
         XCTAssertEqual(siblings, ["usage.json"])
     }
 }
+
+final class CodexResetCreditsTests: XCTestCase {
+    private let fixture = """
+    {"id":1,"result":{}}
+    {"id":2,"result":{"rateLimits":{"primary":{"usedPercent":10,"windowDurationMins":300,"resetsAt":1800000000}},\
+    "rateLimitResetCredits":{"availableCount":3,"credits":[\
+    {"id":"c1","title":"Reset","description":null,"resetType":"codexRateLimits","status":"available","grantedAt":1790000000,"expiresAt":1800100000},\
+    {"id":"c2","title":null,"resetType":"unknown","status":"redeemed","grantedAt":1780000000,"expiresAt":null}]}}}
+    """
+
+    func testParsesCredits() {
+        let credits = CodexUsageClient.parseResetCredits(Data(fixture.utf8))
+        XCTAssertEqual(credits.available, 3)
+        XCTAssertEqual(credits.credits.count, 2)
+        XCTAssertEqual(credits.credits[0].type, "codexRateLimits")
+        XCTAssertEqual(credits.credits[0].expiresAt, Date(timeIntervalSince1970: 1_800_100_000))
+        XCTAssertNil(credits.credits[1].expiresAt)
+        XCTAssertNil(credits.credits[1].title)
+        XCTAssertEqual(credits.nearestExpiry, Date(timeIntervalSince1970: 1_800_100_000))
+    }
+
+    func testMissingCreditsIsEmpty() {
+        let response = #"{"id":2,"result":{"rateLimits":{}}}"#
+        XCTAssertEqual(CodexUsageClient.parseResetCredits(Data(response.utf8)), .none)
+    }
+
+    func testSnapshotEncodesCredits() throws {
+        let credits = CodexUsageClient.parseResetCredits(Data(fixture.utf8))
+        let usage = ProviderUsage(provider: .codex, windows: [], resetCredits: credits)
+        let data = try AllowanceSnapshot(usages: [usage], generatedAt: Date(timeIntervalSince1970: 1_800_000_000)).jsonData()
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let providers = try XCTUnwrap(root["providers"] as? [[String: Any]])
+        let codex = try XCTUnwrap(providers[0]["reset_credits"] as? [String: Any])
+        XCTAssertEqual(codex["available"] as? Int, 3)
+        let rows = try XCTUnwrap(codex["credits"] as? [[String: Any]])
+        XCTAssertEqual(rows[0]["id"] as? String, "c1")
+        XCTAssertEqual(rows[0]["status"] as? String, "available")
+        XCTAssertEqual(rows[0]["granted_at"] as? String, "2026-09-21T14:13:20Z")
+        XCTAssertEqual(rows[0]["expires_at"] as? String, "2027-01-16T11:46:40Z")
+        XCTAssertTrue(rows[1]["expires_at"] is NSNull)
+        let other = try XCTUnwrap(providers[1]["reset_credits"] as? [String: Any])
+        XCTAssertEqual(other["available"] as? Int, 0)
+        XCTAssertEqual((other["credits"] as? [Any])?.count, 0)
+    }
+}
