@@ -2,6 +2,7 @@ import CElectronSafeStorage
 import Foundation
 import XCTest
 @testable import AgentAllowance
+@testable import AgentAllowanceCore
 
 final class ProviderParserTests: XCTestCase {
     func testProcessRunnerKeepsInputOpenUntilResponseMarker() async throws {

@@ -1,3 +1,4 @@
+import AgentAllowanceCore
 import SwiftUI
 
 struct ProviderSectionView: View {

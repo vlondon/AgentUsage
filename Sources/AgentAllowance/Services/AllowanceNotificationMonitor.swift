@@ -1,3 +1,4 @@
+import AgentAllowanceCore
 import Foundation
 
 struct WindowSnapshot: Equatable, Sendable {

@@ -1,3 +1,4 @@
+import AgentAllowanceCore
 import AppKit
 import SwiftUI
 

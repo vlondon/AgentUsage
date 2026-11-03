@@ -1,3 +1,4 @@
+import AgentAllowanceCore
 import SwiftUI
 
 @main

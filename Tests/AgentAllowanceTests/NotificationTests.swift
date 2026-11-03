@@ -2,6 +2,7 @@ import Foundation
 import UserNotifications
 import XCTest
 @testable import AgentAllowance
+@testable import AgentAllowanceCore
 
 final class MockNotificationSender: NotificationSenderProtocol, @unchecked Sendable {
     var authResult = true

@@ -1,7 +1,6 @@
 import Foundation
-import SwiftUI
 
-enum AgentProvider: String, CaseIterable, Identifiable, Sendable {
+public enum AgentProvider: String, CaseIterable, Identifiable, Sendable {
     case codex = "Codex"
     case claude = "Claude"
     case cursor = "Cursor"
@@ -10,30 +9,18 @@ enum AgentProvider: String, CaseIterable, Identifiable, Sendable {
     case grokBot = "Grok Bot"
     case antigravity = "Antigravity"
 
-    var id: String { rawValue }
-
-    var symbolName: String {
-        switch self {
-        case .codex: "terminal"
-        case .claude: "sparkles"
-        case .cursor: "cursorarrow.rays"
-        case .devin: "brain.head.profile"
-        case .grokBuild: "xmark"
-        case .grokBot: "desktopcomputer"
-        case .antigravity: "arrow.up.and.down.and.arrow.left.and.right"
-        }
-    }
+    public var id: String { rawValue }
 }
 
-struct AllowanceWindow: Identifiable, Equatable, Sendable {
-    let id: String
-    let label: String
-    let scope: String?
-    let remainingPercent: Double?
-    let resetAt: Date?
-    let note: String?
+public struct AllowanceWindow: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let label: String
+    public let scope: String?
+    public let remainingPercent: Double?
+    public let resetAt: Date?
+    public let note: String?
 
-    init(
+    public init(
         id: String,
         label: String,
         scope: String? = nil,
@@ -48,25 +35,32 @@ struct AllowanceWindow: Identifiable, Equatable, Sendable {
         self.resetAt = resetAt
         self.note = note
     }
-
-    var indicatorColor: Color {
-        guard let remainingPercent else { return .secondary }
-        if remainingPercent >= 50 { return .green }
-        if remainingPercent >= 20 { return .yellow }
-        return .red
-    }
 }
 
-struct ProviderUsage: Identifiable, Equatable, Sendable {
-    let provider: AgentProvider
-    var windows: [AllowanceWindow]
-    var error: String?
-    var fetchedAt: Date?
-    var isLoading: Bool
+public struct ProviderUsage: Identifiable, Equatable, Sendable {
+    public let provider: AgentProvider
+    public var windows: [AllowanceWindow]
+    public var error: String?
+    public var fetchedAt: Date?
+    public var isLoading: Bool
 
-    var id: AgentProvider { provider }
+    public init(
+        provider: AgentProvider,
+        windows: [AllowanceWindow],
+        error: String? = nil,
+        fetchedAt: Date? = nil,
+        isLoading: Bool = false
+    ) {
+        self.provider = provider
+        self.windows = windows
+        self.error = error
+        self.fetchedAt = fetchedAt
+        self.isLoading = isLoading
+    }
 
-    static func placeholder(for provider: AgentProvider) -> ProviderUsage {
+    public var id: AgentProvider { provider }
+
+    public static func placeholder(for provider: AgentProvider) -> ProviderUsage {
         ProviderUsage(
             provider: provider,
             windows: [],
@@ -77,7 +71,7 @@ struct ProviderUsage: Identifiable, Equatable, Sendable {
     }
 }
 
-enum UsageDateParser {
+public enum UsageDateParser {
     private static let fractionalISO8601: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -90,14 +84,14 @@ enum UsageDateParser {
         return formatter
     }()
 
-    static func parse(_ value: String?) -> Date? {
+    public static func parse(_ value: String?) -> Date? {
         guard let value else { return nil }
         return fractionalISO8601.date(from: value) ?? ISO8601.date(from: value)
     }
 }
 
-enum ResetTimeFormatter {
-    static func string(until resetAt: Date?, now: Date = Date()) -> String {
+public enum ResetTimeFormatter {
+    public static func string(until resetAt: Date?, now: Date = Date()) -> String {
         guard let resetAt else { return "—" }
         let seconds = max(0, Int(resetAt.timeIntervalSince(now)))
         if seconds == 0 { return "now" }

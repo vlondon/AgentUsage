@@ -112,6 +112,26 @@ Without an Apple ID in Xcode, create the self-signed certificate once:
 
 It creates the certificate in your login keychain; nothing is sent anywhere. To remove it, delete "Agent Allowance Local Signing" in Keychain Access.
 
+## Machine-readable output
+
+Other local processes can read the same numbers as JSON (schema 1).
+
+- `allowance --json` prints the snapshot to stdout. `swift build -c release` produces `.build/release/allowance`.
+- `allowance --json --write-cache` also writes it to `~/Library/Caches/AgentAllowance/usage.json`.
+- The menu-bar app writes the same file after every refresh, including background checks, atomically (temp file, then rename).
+- `allowance` exits 0 even when some providers fail; the failure is in that provider's `error`. Providers that are not installed appear with `"installed": false` and no windows.
+
+```json
+{"schema": 1, "generated_at": "2026-11-03T23:20:53Z",
+ "providers": [{"id": "claude", "name": "Claude", "installed": true, "error": null,
+   "windows": [{"id": "five_hour", "label": "5h session", "remaining_pct": 72.0,
+                "resets_at": "2026-11-04T01:29:59Z", "window_minutes": 300, "scope": null}]}]}
+```
+
+Provider ids: `codex`, `claude`, `cursor`, `devin`, `grok_build`, `grok_bot`, `antigravity`. Window ids are `five_hour`, `weekly`, `daily`, `billing_cycle` (Devin's credits pool is `billing_cycle_credits`). A model or pool variant keeps the same id and sets `scope` (Claude model weekly: `weekly` with scope `opus`; Antigravity pools: `gemini`, `claude_gpt`). `remaining_pct` is 0-100, `resets_at` is UTC ISO 8601 or `null`, and `window_minutes` is `null` when the window has no fixed length. Identify a window by `id` plus `scope`.
+
+The models, provider clients and `UsageService` live in the `AgentAllowanceCore` library (no SwiftUI or AppKit); the app and `allowance` both depend on it.
+
 ## Reading the display
 
 All percentages mean **allowance remaining**:

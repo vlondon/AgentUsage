@@ -8,23 +8,36 @@ let package = Package(
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "AgentAllowance", targets: ["AgentAllowance"])
+        .executable(name: "AgentAllowance", targets: ["AgentAllowance"]),
+        .executable(name: "allowance", targets: ["allowance"]),
+        .library(name: "AgentAllowanceCore", targets: ["AgentAllowanceCore"])
     ],
     targets: [
         .target(
             name: "CElectronSafeStorage",
             publicHeadersPath: "include"
         ),
-        .executableTarget(
-            name: "AgentAllowance",
+        .target(
+            name: "AgentAllowanceCore",
             dependencies: ["CElectronSafeStorage"],
             linkerSettings: [
                 .linkedFramework("Security")
             ]
         ),
+        .executableTarget(
+            name: "AgentAllowance",
+            dependencies: ["AgentAllowanceCore"],
+            linkerSettings: [
+                .linkedFramework("Security")
+            ]
+        ),
+        .executableTarget(
+            name: "allowance",
+            dependencies: ["AgentAllowanceCore"]
+        ),
         .testTarget(
             name: "AgentAllowanceTests",
-            dependencies: ["AgentAllowance", "CElectronSafeStorage"]
+            dependencies: ["AgentAllowance", "AgentAllowanceCore", "CElectronSafeStorage"]
         )
     ],
     swiftLanguageModes: [.v5]
