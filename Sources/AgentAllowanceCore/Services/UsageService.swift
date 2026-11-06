@@ -48,7 +48,19 @@ public struct UsageService: Sendable {
     }
 
     init(clients: [any UsageProviderClient]) {
-        self.clients = clients
+        let off = UsageService.disabledProviders()
+        self.clients = clients.filter { !off.contains($0.provider.rawValue.lowercased()) }
+    }
+
+    /// Providers the owner switched off (lowercased raw values), shared by the menu-bar app and the `allowance` CLI:
+    /// `defaults write com.vlondon.AgentAllowance DisabledProviders -array antigravity`, or ALLOWANCE_DISABLED=a,b.
+    /// Added 2026-11-06: agy 1.5.1 raised a «Keychain Not Found … antigravity» dialog on every refresh.
+    static func disabledProviders() -> Set<String> {
+        var names = UserDefaults(suiteName: "com.vlondon.AgentAllowance")?.stringArray(forKey: "DisabledProviders") ?? []
+        if let env = ProcessInfo.processInfo.environment["ALLOWANCE_DISABLED"] {
+            names += env.split(separator: ",").map(String.init)
+        }
+        return Set(names.map { $0.trimmingCharacters(in: .whitespaces).lowercased() }.filter { !$0.isEmpty })
     }
 
     /// Providers whose tool is present, in display order. Re-evaluated on each
