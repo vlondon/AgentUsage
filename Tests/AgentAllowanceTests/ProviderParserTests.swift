@@ -351,9 +351,18 @@ final class ProviderParserTests: XCTestCase {
             StubClient(provider: .antigravity, installed: true),
             StubClient(provider: .codex, installed: true),
             StubClient(provider: .devin, installed: false)
-        ])
+        ], disabled: [])
 
         XCTAssertEqual(service.installedProviders, [.codex, .antigravity])
+    }
+
+    func testDisabledProvidersAreNeverProbed() {
+        let service = UsageService(clients: [
+            StubClient(provider: .antigravity, installed: true),
+            StubClient(provider: .codex, installed: true)
+        ], disabled: ["antigravity"])
+
+        XCTAssertEqual(service.installedProviders, [.codex])
     }
 }
 

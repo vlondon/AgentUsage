@@ -47,8 +47,8 @@ public struct UsageService: Sendable {
         ]
     }
 
-    init(clients: [any UsageProviderClient]) {
-        let off = UsageService.disabledProviders()
+    init(clients: [any UsageProviderClient], disabled: Set<String>? = nil) {
+        let off = disabled ?? UsageService.disabledProviders()
         self.clients = clients.filter { !off.contains($0.provider.rawValue.lowercased()) }
     }
 
@@ -56,7 +56,10 @@ public struct UsageService: Sendable {
     /// `defaults write com.vlondon.AgentAllowance DisabledProviders -array antigravity`, or ALLOWANCE_DISABLED=a,b.
     /// Added 2026-11-06: agy 1.5.1 raised a «Keychain Not Found … antigravity» dialog on every refresh.
     static func disabledProviders() -> Set<String> {
-        var names = UserDefaults(suiteName: "com.vlondon.AgentAllowance")?.stringArray(forKey: "DisabledProviders") ?? []
+        // Read through CFPreferences, not UserDefaults(suiteName:): inside the app the suite name equals its own bundle
+        // id, which UserDefaults refuses ("does not make sense and will not work"), so the menu-bar app kept probing.
+        let value = CFPreferencesCopyAppValue("DisabledProviders" as CFString, "com.vlondon.AgentAllowance" as CFString)
+        var names = (value as? [String]) ?? []
         if let env = ProcessInfo.processInfo.environment["ALLOWANCE_DISABLED"] {
             names += env.split(separator: ",").map(String.init)
         }
